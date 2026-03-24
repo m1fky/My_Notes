@@ -99,6 +99,7 @@ export function NotesApp() {
   const [authBusy, setAuthBusy] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [notificationStatus, setNotificationStatus] = useState<NotificationPermission>("default");
+  const [syncRequest, setSyncRequest] = useState(0);
 
   const supabaseEnabled = hasSupabasePublicEnv();
   const supabase = getSupabaseBrowserClient();
@@ -202,6 +203,9 @@ export function NotesApp() {
       createdAt: folder.updatedAt,
     });
     await loadLocal();
+    if (isOnline && supabase && session) {
+      setSyncRequest(Date.now());
+    }
   }
 
   async function upsertNote(note: Note) {
@@ -214,6 +218,9 @@ export function NotesApp() {
       createdAt: note.updatedAt,
     });
     await loadLocal();
+    if (isOnline && supabase && session) {
+      setSyncRequest(Date.now());
+    }
   }
 
   const syncWithCloud = useCallback(async () => {
@@ -279,6 +286,20 @@ export function NotesApp() {
       void supabase.removeChannel(notesChannel);
     };
   }, [isOnline, session, supabase, syncWithCloud]);
+
+  useEffect(() => {
+    if (!syncRequest || !supabase || !session || !isOnline) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void syncWithCloud();
+    }, 700);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [isOnline, session, supabase, syncRequest, syncWithCloud]);
 
   async function createNote() {
     const timestamp = nowIso();
