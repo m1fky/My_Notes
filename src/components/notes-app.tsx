@@ -48,7 +48,11 @@ function base64ToUint8Array(base64String: string) {
   return Uint8Array.from([...raw].map((char) => char.charCodeAt(0)));
 }
 
-async function ensureSeededData() {
+async function ensureSeededData(seedDemo: boolean) {
+  if (!seedDemo) {
+    return;
+  }
+
   const count = await db.notes.count();
   if (count > 0) {
     return;
@@ -267,7 +271,7 @@ export function NotesApp() {
 
   useEffect(() => {
     const bootstrap = async () => {
-      await ensureSeededData();
+      await ensureSeededData(!supabaseEnabled);
       await normalizeLegacyLocalIds();
       await loadLocal();
       setIsLoading(false);

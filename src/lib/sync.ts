@@ -81,7 +81,7 @@ function noteToRemote(note: Note, userId: string) {
     updated_at: note.updatedAt,
     deleted_at: note.deletedAt ?? null,
     version: note.version,
-    last_synced_version: note.lastSyncedVersion,
+    last_synced_version: note.version,
   };
 }
 
@@ -150,7 +150,7 @@ export async function pullSnapshot(client: SupabaseClient, userId: string): Prom
       updatedAt: row.updated_at,
       deletedAt: row.deleted_at,
       version: row.version,
-      lastSyncedVersion: row.last_synced_version,
+      lastSyncedVersion: Math.max(row.version, row.last_synced_version),
       syncState: "synced",
       reminders: remindersByNote.get(row.id) ?? [],
       attachments: attachmentsByNote.get(row.id) ?? [],
