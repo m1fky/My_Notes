@@ -40,7 +40,7 @@ CRON_SECRET=
 1. Залейте проект в GitHub.
 2. Импортируйте репозиторий в Netlify.
 3. Build command: `npm run build`
-4. Publish directory вручную указывать не нужно: Netlify сам подхватит Next.js runtime.
+4. Publish directory: `.next`
 5. Добавьте в Netlify переменные окружения:
 
 ```bash
