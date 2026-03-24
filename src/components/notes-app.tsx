@@ -31,7 +31,7 @@ import { formatReminder, hasDueReminder } from "@/lib/reminders";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { flushQueue, pullSnapshot } from "@/lib/sync";
 import type { Folder, Note, Reminder, SyncQueueItem } from "@/lib/types";
-import { cn, deviceNameFromNavigator, makeId, toTitle } from "@/lib/utils";
+import { cn, deviceNameFromNavigator, isUuid, makeId, toTitle } from "@/lib/utils";
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -66,6 +66,115 @@ async function ensureSeededData() {
         createdAt: note.updatedAt,
       })),
     );
+  });
+}
+
+async function normalizeLegacyLocalIds() {
+  const [folders, notes, queue] = await Promise.all([
+    db.folders.toArray(),
+    db.notes.toArray(),
+    db.syncQueue.toArray(),
+  ]);
+
+  const folderIdMap = new Map<string, string>();
+  const noteIdMap = new Map<string, string>();
+
+  for (const folder of folders) {
+    if (!isUuid(folder.id)) {
+      folderIdMap.set(folder.id, makeId());
+    }
+  }
+
+  for (const note of notes) {
+    if (!isUuid(note.id)) {
+      noteIdMap.set(note.id, makeId());
+    }
+  }
+
+  const needsMigration =
+    folderIdMap.size > 0 ||
+    noteIdMap.size > 0 ||
+    notes.some((note) =>
+      note.reminders.some((reminder) => !isUuid(reminder.id)) ||
+      note.attachments.some((attachment) => !isUuid(attachment.id)),
+    );
+
+  if (!needsMigration) {
+    return;
+  }
+
+  const migratedFolders = folders.map((folder) => ({
+    ...folder,
+    id: folderIdMap.get(folder.id) ?? folder.id,
+  }));
+
+  const migratedNotes = notes.map((note) => {
+    const nextNoteId = noteIdMap.get(note.id) ?? note.id;
+
+    return {
+      ...note,
+      id: nextNoteId,
+      folderId: note.folderId ? (folderIdMap.get(note.folderId) ?? note.folderId) : null,
+      attachments: note.attachments.map((attachment) => ({
+        ...attachment,
+        id: isUuid(attachment.id) ? attachment.id : makeId(),
+        noteId: nextNoteId,
+      })),
+      reminders: note.reminders.map((reminder) => ({
+        ...reminder,
+        id: isUuid(reminder.id) ? reminder.id : makeId(),
+        noteId: nextNoteId,
+      })),
+    };
+  });
+
+  const migratedQueue = queue.map((item) => {
+    if (item.entity === "folder" && "color" in item.payload) {
+      const folder = item.payload as Folder;
+      const nextFolder: Folder = {
+        ...folder,
+        id: folderIdMap.get(folder.id) ?? folder.id,
+      };
+
+      return {
+        ...item,
+        id: `queue-folder-${nextFolder.id}`,
+        payload: nextFolder,
+      };
+    }
+
+    const note = item.payload as Note;
+    const nextNoteId = noteIdMap.get(note.id) ?? note.id;
+    const nextNote: Note = {
+      ...note,
+      id: nextNoteId,
+      folderId: note.folderId ? (folderIdMap.get(note.folderId) ?? note.folderId) : null,
+      attachments: note.attachments.map((attachment) => ({
+        ...attachment,
+        id: isUuid(attachment.id) ? attachment.id : makeId(),
+        noteId: nextNoteId,
+      })),
+      reminders: note.reminders.map((reminder) => ({
+        ...reminder,
+        id: isUuid(reminder.id) ? reminder.id : makeId(),
+        noteId: nextNoteId,
+      })),
+    };
+
+    return {
+      ...item,
+      id: `queue-note-${nextNote.id}`,
+      payload: nextNote,
+    };
+  });
+
+  await db.transaction("rw", db.folders, db.notes, db.syncQueue, async () => {
+    await db.folders.clear();
+    await db.notes.clear();
+    await db.syncQueue.clear();
+    await db.folders.bulkPut(migratedFolders);
+    await db.notes.bulkPut(migratedNotes);
+    await db.syncQueue.bulkPut(migratedQueue);
   });
 }
 
@@ -150,6 +259,7 @@ export function NotesApp() {
   useEffect(() => {
     const bootstrap = async () => {
       await ensureSeededData();
+      await normalizeLegacyLocalIds();
       await loadLocal();
       setIsLoading(false);
       setSyncLabel(supabaseEnabled ? "Локальные данные готовы" : "Demo/local mode");

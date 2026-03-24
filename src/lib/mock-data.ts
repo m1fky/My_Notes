@@ -3,16 +3,21 @@ import type { Folder, Note } from "@/lib/types";
 
 const now = new Date().toISOString();
 
+const demoFolderInboxId = "f3e7c4d2-6fd8-4c54-9a55-54e7bf8a8d21";
+const demoFolderFocusId = "c961f5db-3772-4496-8fbc-787a263d95bd";
+const demoWelcomeId = "f4e5fe2f-0fde-4c4b-b4ec-34a11f716b31";
+const demoIdeasId = "77170129-4d12-4781-8cc7-cfd4542ad83d";
+
 export const demoFolders: Folder[] = [
   {
-    id: "folder-inbox",
+    id: demoFolderInboxId,
     name: "Inbox",
     color: "#7dd3fc",
     createdAt: now,
     updatedAt: now,
   },
   {
-    id: "folder-focus",
+    id: demoFolderFocusId,
     name: "Focus",
     color: "#f9a8d4",
     createdAt: now,
@@ -22,9 +27,9 @@ export const demoFolders: Folder[] = [
 
 export const demoNotes: Note[] = [
   {
-    id: "note-welcome",
+    id: demoWelcomeId,
     title: "Добро пожаловать в Liquid Notes",
-    folderId: "folder-inbox",
+    folderId: demoFolderInboxId,
     tags: ["pwa", "demo"],
     contentJson: {
       type: "doc",
@@ -72,9 +77,9 @@ export const demoNotes: Note[] = [
     reminders: [],
   },
   {
-    id: "note-ideas",
+    id: demoIdeasId,
     title: "Идеи для следующей версии",
-    folderId: "folder-focus",
+    folderId: demoFolderFocusId,
     tags: ["roadmap"],
     contentJson: emptyDoc(),
     plainText: "Идеи для следующей версии",
