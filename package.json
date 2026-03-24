@@ -1,0 +1,54 @@
+{
+  "name": "notes",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "pwa",
+    "notes",
+    "nextjs",
+    "supabase"
+  ],
+  "author": "",
+  "license": "MIT",
+  "description": "Cross-platform notes PWA with local-first sync and Supabase integration.",
+  "dependencies": {
+    "@supabase/ssr": "^0.9.0",
+    "@supabase/supabase-js": "^2.100.0",
+    "@tiptap/extension-image": "^3.20.5",
+    "@tiptap/extension-link": "^3.20.5",
+    "@tiptap/extension-placeholder": "^3.20.5",
+    "@tiptap/extension-task-item": "^3.20.5",
+    "@tiptap/extension-task-list": "^3.20.5",
+    "@tiptap/extension-underline": "^3.20.5",
+    "@tiptap/react": "^3.20.5",
+    "@tiptap/starter-kit": "^3.20.5",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "dexie": "^4.3.0",
+    "lucide-react": "^1.6.0",
+    "motion": "^12.38.0",
+    "next": "^16.2.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "tailwind-merge": "^3.5.0",
+    "web-push": "^3.6.7",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.2",
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.1",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^5.9.3"
+  }
+}

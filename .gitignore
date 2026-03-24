@@ -1,0 +1,11 @@
+.next
+node_modules
+.env
+.env.local
+.env.production
+npm-debug.log*
+pnpm-lock.yaml
+yarn.lock
+coverage
+playwright-report
+test-results
