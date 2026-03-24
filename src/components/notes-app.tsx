@@ -58,6 +58,15 @@ async function ensureSeededData() {
     await db.folders.bulkPut(demoFolders);
     await db.notes.bulkPut(demoNotes);
     await db.syncQueue.bulkPut(
+      demoFolders.map((folder) => ({
+        id: `seed-folder-${folder.id}`,
+        entity: "folder" as const,
+        operation: "upsert" as const,
+        payload: folder,
+        createdAt: folder.updatedAt,
+      })),
+    );
+    await db.syncQueue.bulkPut(
       demoNotes.map((note) => ({
         id: `seed-${note.id}`,
         entity: "note" as const,
@@ -303,6 +312,22 @@ export function NotesApp() {
     await db.syncQueue.put(item);
   }
 
+  async function ensureFoldersQueuedForSync() {
+    const localFolders = await db.folders.toArray();
+
+    await Promise.all(
+      localFolders.map((folder) =>
+        db.syncQueue.put({
+          id: `queue-folder-${folder.id}`,
+          entity: "folder",
+          operation: "upsert",
+          payload: folder,
+          createdAt: folder.updatedAt,
+        }),
+      ),
+    );
+  }
+
   async function upsertFolder(folder: Folder) {
     await db.folders.put(folder);
     await pushQueueItem({
@@ -340,6 +365,7 @@ export function NotesApp() {
 
     try {
       setSyncLabel("Синхронизирую с облаком…");
+      await ensureFoldersQueuedForSync();
       const queue = await db.syncQueue.toArray();
 
       if (queue.length) {
