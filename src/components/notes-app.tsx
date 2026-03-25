@@ -1313,8 +1313,8 @@ export function NotesApp() {
   }
 
   return (
-    <main className="safe-shell mx-auto flex min-h-screen max-w-[1600px] flex-col gap-4 px-3 py-3 pb-28 md:px-5 md:py-5 md:pb-5">
-      <div className="glass-panel rounded-[30px] border border-white/10 px-4 py-4 md:px-5">
+    <main className="safe-shell mx-auto flex min-h-screen max-w-[1600px] flex-col gap-4 px-3 py-3 pb-28 md:px-5 md:py-5 md:pb-5 lg:h-screen lg:max-h-screen">
+      <div className="shrink-0 glass-panel rounded-[30px] border border-white/10 px-4 py-4 md:px-5">
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-2">
@@ -1389,11 +1389,10 @@ export function NotesApp() {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:items-start lg:grid-cols-[320px_minmax(0,1fr)_320px] xl:grid-cols-[340px_minmax(0,1fr)_360px] 2xl:grid-cols-[360px_minmax(0,1fr)_380px]">
+      <div className="grid gap-4 lg:flex-1 lg:min-h-0 lg:grid-cols-[320px_minmax(0,1fr)_320px] xl:grid-cols-[340px_minmax(0,1fr)_360px] 2xl:grid-cols-[360px_minmax(0,1fr)_380px]">
         <aside
           className={cn(
-            "glass-panel flex flex-col rounded-[34px] border border-white/10 p-4",
-            "lg:sticky lg:top-5 lg:h-[calc(100vh-2.5rem)]",
+            "glass-panel flex flex-col rounded-[34px] border border-white/10 p-4 lg:min-h-0",
             mobileView !== "library" && "hidden lg:block",
           )}
         >
@@ -1677,7 +1676,7 @@ export function NotesApp() {
           </div>
         </aside>
 
-        <section className={cn("min-w-0 space-y-4 lg:min-h-[calc(100vh-210px)]", mobileView !== "editor" && "hidden lg:block")}>
+        <section className={cn("min-w-0 space-y-4 lg:min-h-0 lg:overflow-y-auto", mobileView !== "editor" && "hidden lg:block")}>
           {selectedNote ? (
             <div className="glass-panel rounded-[28px] border border-white/10 px-4 py-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1759,8 +1758,7 @@ export function NotesApp() {
 
         <aside
           className={cn(
-            "space-y-4",
-            "lg:sticky lg:top-5 lg:h-[calc(100vh-2.5rem)] lg:overflow-y-auto",
+            "space-y-4 lg:min-h-0 lg:overflow-y-auto",
             mobileView !== "details" && "hidden lg:block",
           )}
         >
