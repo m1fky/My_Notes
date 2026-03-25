@@ -28,7 +28,9 @@ interface NoteEditorProps {
   note: Note | null;
   onTitleChange: (title: string) => void;
   onContentChange: (content: JSONContent, plainText: string) => void;
-  onAddImages: (files: FileList | null) => Promise<void>;
+  onAddImages: (
+    files: FileList | null,
+  ) => Promise<Array<{ name: string; sourceUrl: string }> | null | undefined>;
 }
 
 function ToolbarButton({
@@ -65,6 +67,7 @@ export function NoteEditor({
   onAddImages,
 }: NoteEditorProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInsertSelectionRef = useRef<{ from: number; to: number } | null>(null);
   const [isLinkPanelOpen, setIsLinkPanelOpen] = useState(false);
   const [linkDraft, setLinkDraft] = useState("");
 
@@ -73,11 +76,40 @@ export function NoteEditor({
       return;
     }
 
-    await onAddImages(files);
+    const attachments = await onAddImages(files);
+
+    if (editor && attachments?.length) {
+      const selection = imageInsertSelectionRef.current;
+      const chain = editor.chain().focus();
+
+      if (selection) {
+        chain.setTextSelection(selection);
+      }
+
+      chain
+        .insertContent(
+          attachments.flatMap((attachment) => [
+            {
+              type: "image" as const,
+              attrs: {
+                src: attachment.sourceUrl,
+                alt: attachment.name,
+                title: attachment.name,
+              },
+            },
+            {
+              type: "paragraph" as const,
+            },
+          ]),
+        )
+        .run();
+    }
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+
+    imageInsertSelectionRef.current = null;
   }
 
   const editor = useEditor({
@@ -181,7 +213,15 @@ export function NoteEditor({
           </div>
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => {
+              if (editor) {
+                imageInsertSelectionRef.current = {
+                  from: editor.state.selection.from,
+                  to: editor.state.selection.to,
+                };
+              }
+              fileInputRef.current?.click();
+            }}
             className="inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-white/12 bg-white/9 px-4 py-2 text-sm font-medium text-white transition hover:border-white/24 hover:bg-white/14"
           >
             <ImagePlus className="h-4 w-4" />
