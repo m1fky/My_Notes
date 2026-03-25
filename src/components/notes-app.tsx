@@ -1235,11 +1235,38 @@ export function NotesApp() {
 
           <section className="glass-panel rounded-[36px] border border-white/10 p-6 md:p-8">
             <div className="space-y-5">
-              <div>
+              <div className="space-y-4">
                 <p className="text-sm uppercase tracking-[0.28em] text-white/40">Auth</p>
+                <div className="grid grid-cols-2 gap-2 rounded-[24px] border border-white/10 bg-white/6 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setAuthMode("sign-in")}
+                    className={cn(
+                      "rounded-[18px] px-4 py-3 text-sm font-medium transition",
+                      authMode === "sign-in" ? "bg-white/92 text-slate-950" : "text-white/64 hover:text-white",
+                    )}
+                  >
+                    Вход
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAuthMode("sign-up")}
+                    className={cn(
+                      "rounded-[18px] px-4 py-3 text-sm font-medium transition",
+                      authMode === "sign-up" ? "bg-white/92 text-slate-950" : "text-white/64 hover:text-white",
+                    )}
+                  >
+                    Создать аккаунт
+                  </button>
+                </div>
                 <h2 className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-white">
                   {authMode === "sign-in" ? "Войти" : "Создать аккаунт"}
                 </h2>
+                <p className="text-sm leading-6 text-white/60">
+                  {authMode === "sign-in"
+                    ? "Войдите, чтобы получить синхронизацию между устройствами, push и облачное хранение."
+                    : "Создайте аккаунт, чтобы заметки сразу синхронизировались между iPhone, Android и ПК."}
+                </p>
               </div>
               <div className="space-y-3">
                 <input
@@ -1271,15 +1298,23 @@ export function NotesApp() {
               >
                 Google sign-in
               </button>
-              <button
-                type="button"
-                onClick={() => setAuthMode((mode) => (mode === "sign-in" ? "sign-up" : "sign-in"))}
-                className="text-sm text-white/58"
-              >
-                {authMode === "sign-in"
-                  ? "Нет аккаунта? Создать"
-                  : "Уже есть аккаунт? Переключиться на вход"}
-              </button>
+              {authMode === "sign-in" ? (
+                <button
+                  type="button"
+                  onClick={() => setAuthMode("sign-up")}
+                  className="w-full rounded-[22px] border border-sky-300/20 bg-sky-300/12 px-4 py-4 text-sm font-medium text-white transition hover:bg-sky-300/18"
+                >
+                  Нет аккаунта? Создать и включить синхронизацию
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setAuthMode("sign-in")}
+                  className="text-sm text-white/58"
+                >
+                  Уже есть аккаунт? Переключиться на вход
+                </button>
+              )}
               {authMessage ? <p className="text-sm leading-6 text-white/62">{authMessage}</p> : null}
             </div>
           </section>
@@ -1450,8 +1485,9 @@ export function NotesApp() {
             />
           </div>
 
-          <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
-            <div className="mb-5 space-y-2">
+          <div className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden">
+            <div className="space-y-5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
+              <div className="space-y-2">
               <button
                 type="button"
                 onClick={() => setFolderFilter("all")}
@@ -1467,172 +1503,172 @@ export function NotesApp() {
                 <span>{notes.filter((note) => !note.deletedAt && !note.isArchived).length}</span>
               </button>
               {folders.map((folder) => {
-              const noteCount = notes.filter((note) => note.folderId === folder.id && !note.deletedAt).length;
-              const active = folderFilter === folder.id;
+                const noteCount = notes.filter((note) => note.folderId === folder.id && !note.deletedAt).length;
+                const active = folderFilter === folder.id;
 
-              if (editingFolderId === folder.id) {
-                return (
-                  <div key={folder.id} className="rounded-[22px] border border-white/12 bg-white/10 p-3">
-                    <input
-                      value={folderDraftName}
-                      onChange={(event) => setFolderDraftName(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          void saveFolderName(folder);
-                        }
-                        if (event.key === "Escape") {
-                          event.preventDefault();
-                          resetFolderComposer();
-                        }
-                      }}
-                      autoFocus
-                      className="w-full rounded-[18px] border border-white/10 bg-white/6 px-4 py-3 text-white outline-none"
-                    />
-                    <div className="mt-3 flex items-center justify-between gap-3">
-                      <span className="text-sm text-white/48">{noteCount} заметок</span>
-                      <div className="flex items-center gap-2">
+                if (editingFolderId === folder.id) {
+                  return (
+                    <div key={folder.id} className="rounded-[22px] border border-white/12 bg-white/10 p-3">
+                      <input
+                        value={folderDraftName}
+                        onChange={(event) => setFolderDraftName(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void saveFolderName(folder);
+                          }
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            resetFolderComposer();
+                          }
+                        }}
+                        autoFocus
+                        className="w-full rounded-[18px] border border-white/10 bg-white/6 px-4 py-3 text-white outline-none"
+                      />
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                        <span className="text-sm text-white/48">{noteCount} заметок</span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={resetFolderComposer}
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-[16px] border border-white/10 bg-white/6 text-white/62 transition hover:bg-white/10 hover:text-white"
+                            aria-label={`Отменить редактирование папки ${folder.name}`}
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void saveFolderName(folder)}
+                            disabled={!folderDraftName.trim()}
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-[16px] border border-sky-300/20 bg-sky-300/16 text-white transition hover:bg-sky-300/22 disabled:opacity-45"
+                            aria-label={`Сохранить папку ${folder.name}`}
+                          >
+                            <Check className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (pendingDeleteFolderId === folder.id) {
+                  return (
+                    <div key={folder.id} className="rounded-[22px] border border-rose-300/16 bg-rose-400/10 p-3">
+                      <p className="text-sm font-medium text-rose-50">Удалить «{folder.name}»?</p>
+                      <p className="mt-1 text-sm leading-6 text-rose-100/72">
+                        Заметки останутся и автоматически перейдут в «Без папки».
+                      </p>
+                      <div className="mt-3 flex items-center justify-end gap-2">
                         <button
                           type="button"
                           onClick={resetFolderComposer}
-                          className="inline-flex h-10 w-10 items-center justify-center rounded-[16px] border border-white/10 bg-white/6 text-white/62 transition hover:bg-white/10 hover:text-white"
-                          aria-label={`Отменить редактирование папки ${folder.name}`}
+                          className="inline-flex rounded-[16px] border border-white/10 bg-white/8 px-4 py-2 text-sm text-white/72 transition hover:bg-white/12 hover:text-white"
                         >
-                          <X className="h-4 w-4" />
+                          Отмена
                         </button>
                         <button
                           type="button"
-                          onClick={() => void saveFolderName(folder)}
-                          disabled={!folderDraftName.trim()}
-                          className="inline-flex h-10 w-10 items-center justify-center rounded-[16px] border border-sky-300/20 bg-sky-300/16 text-white transition hover:bg-sky-300/22 disabled:opacity-45"
-                          aria-label={`Сохранить папку ${folder.name}`}
+                          onClick={() => void deleteFolder(folder)}
+                          className="inline-flex rounded-[16px] border border-rose-300/20 bg-rose-400/18 px-4 py-2 text-sm font-medium text-rose-50 transition hover:bg-rose-400/24"
                         >
-                          <Check className="h-4 w-4" />
+                          Удалить
                         </button>
                       </div>
                     </div>
-                  </div>
-                );
-              }
+                  );
+                }
 
-              if (pendingDeleteFolderId === folder.id) {
                 return (
-                  <div key={folder.id} className="rounded-[22px] border border-rose-300/16 bg-rose-400/10 p-3">
-                    <p className="text-sm font-medium text-rose-50">Удалить «{folder.name}»?</p>
-                    <p className="mt-1 text-sm leading-6 text-rose-100/72">
-                      Заметки останутся и автоматически перейдут в «Без папки».
-                    </p>
-                    <div className="mt-3 flex items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={resetFolderComposer}
-                        className="inline-flex rounded-[16px] border border-white/10 bg-white/8 px-4 py-2 text-sm text-white/72 transition hover:bg-white/12 hover:text-white"
-                      >
-                        Отмена
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void deleteFolder(folder)}
-                        className="inline-flex rounded-[16px] border border-rose-300/20 bg-rose-400/18 px-4 py-2 text-sm font-medium text-rose-50 transition hover:bg-rose-400/24"
-                      >
-                        Удалить
-                      </button>
-                    </div>
-                  </div>
-                );
-              }
-
-              return (
-                <div
-                  key={folder.id}
-                  className={cn(
-                    "flex items-center gap-2 rounded-[22px] border px-2 py-2 transition",
-                    active
-                      ? "border-white/18 bg-white/14 text-white"
-                      : "border-white/8 bg-white/4 text-white/68 hover:bg-white/8",
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setFolderFilter(folder.id)}
-                    className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-[18px] px-2 py-2 text-left"
-                  >
-                    <span className="inline-flex min-w-0 items-center gap-3">
-                      <span className="h-3 w-3 rounded-full" style={{ backgroundColor: folder.color }} />
-                      <span className="truncate">{folder.name}</span>
-                    </span>
-                    <span className="text-sm text-white/48">{noteCount}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => startRenameFolder(folder)}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-[16px] border border-white/10 bg-white/6 text-white/62 transition hover:border-white/20 hover:bg-white/12 hover:text-white"
-                    aria-label={`Переименовать папку ${folder.name}`}
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => requestDeleteFolder(folder.id)}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-[16px] border border-rose-300/12 bg-rose-400/8 text-rose-100/78 transition hover:border-rose-300/20 hover:bg-rose-400/14 hover:text-rose-50"
-                    aria-label={`Удалить папку ${folder.name}`}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              );
-              })}
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm uppercase tracking-[0.24em] text-white/35">Список</p>
-                <span className="text-sm text-white/48">{visibleNotes.length}</span>
-              </div>
-              <div className="max-h-[58vh] space-y-3 overflow-y-auto pr-1 lg:max-h-none lg:overflow-visible">
-              <AnimatePresence initial={false}>
-                {visibleNotes.map((note) => (
-                  <motion.button
-                    key={note.id}
-                    layout
-                    onClick={() => {
-                      setSelectedNoteId(note.id);
-                      if (isCompactLayout) {
-                        setMobileView("editor");
-                      }
-                    }}
+                  <div
+                    key={folder.id}
                     className={cn(
-                      "w-full rounded-[28px] border px-4 py-4 text-left transition",
-                      selectedNoteId === note.id
-                        ? "border-white/20 bg-white/16"
-                        : "border-white/8 bg-white/6 hover:bg-white/9",
+                      "flex items-center gap-2 rounded-[22px] border px-2 py-2 transition",
+                      active
+                        ? "border-white/18 bg-white/14 text-white"
+                        : "border-white/8 bg-white/4 text-white/68 hover:bg-white/8",
                     )}
                   >
-                    <div className="mb-3 flex items-start justify-between gap-3">
-                      <div>
-                        <p className="line-clamp-2 text-base font-medium text-white">{displayTitle(note.title)}</p>
-                        <p className="mt-1 text-xs text-white/42">
-                          {folders.find((folder) => folder.id === note.folderId)?.name ?? "Без папки"}
-                        </p>
-                      </div>
-                      {note.isPinned ? <Star className="h-4 w-4 text-sky-300" /> : null}
-                    </div>
-                    <p className="line-clamp-3 text-sm leading-6 text-white/58">{note.plainText || "Пустая заметка"}</p>
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      {note.tags.slice(0, 2).map((tag) => (
-                        <span key={tag} className="rounded-full bg-white/8 px-3 py-1 text-xs text-white/58">
-                          #{tag}
-                        </span>
-                      ))}
-                      {hasDueReminder(note.reminders) ? (
-                        <span className="rounded-full bg-rose-400/16 px-3 py-1 text-xs text-rose-200">
-                          Reminder due
-                        </span>
-                      ) : null}
-                    </div>
-                  </motion.button>
-                ))}
-              </AnimatePresence>
+                    <button
+                      type="button"
+                      onClick={() => setFolderFilter(folder.id)}
+                      className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-[18px] px-2 py-2 text-left"
+                    >
+                      <span className="inline-flex min-w-0 items-center gap-3">
+                        <span className="h-3 w-3 rounded-full" style={{ backgroundColor: folder.color }} />
+                        <span className="truncate">{folder.name}</span>
+                      </span>
+                      <span className="text-sm text-white/48">{noteCount}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => startRenameFolder(folder)}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-[16px] border border-white/10 bg-white/6 text-white/62 transition hover:border-white/20 hover:bg-white/12 hover:text-white"
+                      aria-label={`Переименовать папку ${folder.name}`}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => requestDeleteFolder(folder.id)}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-[16px] border border-rose-300/12 bg-rose-400/8 text-rose-100/78 transition hover:border-rose-300/20 hover:bg-rose-400/14 hover:text-rose-50"
+                      aria-label={`Удалить папку ${folder.name}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                );
+              })}
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm uppercase tracking-[0.24em] text-white/35">Список</p>
+                  <span className="text-sm text-white/48">{visibleNotes.length}</span>
+                </div>
+                <div className="space-y-3">
+                  <AnimatePresence initial={false}>
+                    {visibleNotes.map((note) => (
+                      <motion.button
+                        key={note.id}
+                        layout
+                        onClick={() => {
+                          setSelectedNoteId(note.id);
+                          if (isCompactLayout) {
+                            setMobileView("editor");
+                          }
+                        }}
+                        className={cn(
+                          "w-full rounded-[28px] border px-4 py-4 text-left transition",
+                          selectedNoteId === note.id
+                            ? "border-white/20 bg-white/16"
+                            : "border-white/8 bg-white/6 hover:bg-white/9",
+                        )}
+                      >
+                        <div className="mb-3 flex items-start justify-between gap-3">
+                          <div>
+                            <p className="line-clamp-2 text-base font-medium text-white">{displayTitle(note.title)}</p>
+                            <p className="mt-1 text-xs text-white/42">
+                              {folders.find((folder) => folder.id === note.folderId)?.name ?? "Без папки"}
+                            </p>
+                          </div>
+                          {note.isPinned ? <Star className="h-4 w-4 text-sky-300" /> : null}
+                        </div>
+                        <p className="line-clamp-3 text-sm leading-6 text-white/58">{note.plainText || "Пустая заметка"}</p>
+                        <div className="mt-4 flex flex-wrap items-center gap-2">
+                          {note.tags.slice(0, 2).map((tag) => (
+                            <span key={tag} className="rounded-full bg-white/8 px-3 py-1 text-xs text-white/58">
+                              #{tag}
+                            </span>
+                          ))}
+                          {hasDueReminder(note.reminders) ? (
+                            <span className="rounded-full bg-rose-400/16 px-3 py-1 text-xs text-rose-200">
+                              Reminder due
+                            </span>
+                          ) : null}
+                        </div>
+                      </motion.button>
+                    ))}
+                  </AnimatePresence>
+                </div>
                 {!visibleNotes.length ? (
                   <div className="rounded-[28px] border border-dashed border-white/14 bg-white/5 px-5 py-8 text-center">
                     <p className="text-base font-medium text-white">Пока пусто</p>
@@ -1737,7 +1773,7 @@ export function NotesApp() {
         <aside
           className={cn(
             "space-y-4",
-            "lg:sticky lg:top-[170px] lg:h-[calc(100vh-210px)] lg:min-h-0 lg:overflow-y-auto lg:pr-1 lg:pb-3",
+            "lg:self-start lg:pr-1",
             mobileView !== "details" && "hidden lg:block",
           )}
         >
