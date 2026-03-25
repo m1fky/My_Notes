@@ -26,7 +26,7 @@ import { NoteEditor } from "@/components/note-editor";
 import { db } from "@/lib/db";
 import { emptyDoc } from "@/lib/editor";
 import { hasSupabasePublicEnv, publicEnv } from "@/lib/env";
-import { demoFolders, demoNotes } from "@/lib/mock-data";
+import { demoFolders, demoNotes, isDemoFolderSeed, isDemoNoteSeed } from "@/lib/mock-data";
 import { formatReminder, hasDueReminder } from "@/lib/reminders";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { flushQueue, pullSnapshot } from "@/lib/sync";
@@ -191,28 +191,172 @@ async function normalizeLegacyLocalIds() {
   });
 }
 
-async function clearSeededDemoState(
-  supabaseReady: boolean,
-  isAuthed: boolean,
-  demoNoteIds: Set<string>,
-) {
-  if (!supabaseReady || !isAuthed) {
-    return;
+function stripSeededDemoData(notes: Note[], folders: Folder[]) {
+  const removedNoteIds = new Set<string>();
+  const notesWithoutDemo = notes.filter((note) => {
+    const isDemo = isDemoNoteSeed(note);
+    if (isDemo) {
+      removedNoteIds.add(note.id);
+    }
+    return !isDemo;
+  });
+
+  const removedFolderIds = new Set(
+    folders
+      .filter((folder) => isDemoFolderSeed(folder))
+      .filter((folder) => !notesWithoutDemo.some((note) => note.folderId === folder.id))
+      .map((folder) => folder.id),
+  );
+
+  const cleanedNotes = notesWithoutDemo.map((note) =>
+    note.folderId && removedFolderIds.has(note.folderId)
+      ? {
+          ...note,
+          folderId: null,
+        }
+      : note,
+  );
+
+  return {
+    notes: cleanedNotes,
+    folders: folders.filter((folder) => !removedFolderIds.has(folder.id)),
+    removedNoteIds,
+    removedFolderIds,
+  };
+}
+
+async function purgeLocalDemoState(cloudMode: boolean, isAuthed: boolean) {
+  if (!cloudMode || !isAuthed) {
+    return false;
   }
 
-  const localNotes = await db.notes.toArray();
+  const [localNotes, localFolders, queue] = await Promise.all([
+    db.notes.toArray(),
+    db.folders.toArray(),
+    db.syncQueue.toArray(),
+  ]);
 
-  const localHasOnlyDemo =
-    localNotes.length > 0 && localNotes.every((note) => demoNoteIds.has(note.id));
+  const { notes: cleanedNotes, folders: cleanedFolders, removedNoteIds, removedFolderIds } =
+    stripSeededDemoData(localNotes, localFolders);
 
-  if (!localHasOnlyDemo) {
-    return;
+  let changed = removedNoteIds.size > 0 || removedFolderIds.size > 0;
+
+  const cleanedQueue = queue
+    .filter((item) => {
+      if (item.entity === "folder" && "color" in item.payload) {
+        const folder = item.payload as Folder;
+        if (removedFolderIds.has(folder.id)) {
+          changed = true;
+          return false;
+        }
+
+        if (isDemoFolderSeed(folder) && !cleanedNotes.some((note) => note.folderId === folder.id)) {
+          changed = true;
+          return false;
+        }
+
+        return true;
+      }
+
+      const note = item.payload as Note;
+      if (removedNoteIds.has(note.id) || isDemoNoteSeed(note)) {
+        changed = true;
+        return false;
+      }
+
+      return true;
+    })
+    .map((item) => {
+      if (item.entity === "note" && "contentJson" in item.payload) {
+        const note = item.payload as Note;
+        if (note.folderId && removedFolderIds.has(note.folderId)) {
+          changed = true;
+        }
+
+        return {
+          ...item,
+          payload: {
+            ...note,
+            folderId: note.folderId && removedFolderIds.has(note.folderId) ? null : note.folderId,
+          },
+        };
+      }
+
+      return item;
+    });
+
+  if (!changed && cleanedQueue.length === queue.length) {
+    return false;
   }
 
   await db.transaction("rw", db.folders, db.notes, db.syncQueue, async () => {
     await db.folders.clear();
     await db.notes.clear();
     await db.syncQueue.clear();
+    if (cleanedFolders.length) {
+      await db.folders.bulkPut(cleanedFolders);
+    }
+    if (cleanedNotes.length) {
+      await db.notes.bulkPut(cleanedNotes);
+    }
+    if (cleanedQueue.length) {
+      await db.syncQueue.bulkPut(cleanedQueue);
+    }
+  });
+
+  return true;
+}
+
+async function settleProcessedQueue(queue: SyncQueueItem[]) {
+  if (!queue.length) {
+    return;
+  }
+
+  const currentQueue = await db.syncQueue.bulkGet(queue.map((item) => item.id));
+  const queueIdsToDelete = currentQueue.flatMap((currentItem, index) => {
+    const processedItem = queue[index];
+
+    if (!currentItem) {
+      return [];
+    }
+
+    return currentItem.createdAt === processedItem.createdAt ? [processedItem.id] : [];
+  });
+
+  const processedNoteItems = queue.filter(
+    (item): item is SyncQueueItem & { payload: Note } =>
+      item.entity === "note" && "contentJson" in item.payload,
+  );
+
+  const currentNotes = await db.notes.bulkGet(processedNoteItems.map((item) => item.payload.id));
+  const notesToUpdate = currentNotes.flatMap((currentNote, index) => {
+    const processedNote = processedNoteItems[index].payload;
+
+    if (!currentNote) {
+      return [];
+    }
+
+    if (currentNote.updatedAt !== processedNote.updatedAt || currentNote.version !== processedNote.version) {
+      return [];
+    }
+
+    return [
+      {
+        ...currentNote,
+        lastSyncedVersion: Math.max(currentNote.lastSyncedVersion, currentNote.version),
+        syncState: "synced" as const,
+      },
+    ];
+  });
+
+  await db.transaction("rw", db.notes, db.syncQueue, async () => {
+    if (queueIdsToDelete.length) {
+      await db.syncQueue.bulkDelete(queueIdsToDelete);
+    }
+
+    if (notesToUpdate.length) {
+      await db.notes.bulkPut(notesToUpdate);
+    }
   });
 }
 
@@ -251,7 +395,6 @@ export function NotesApp() {
 
   const supabaseEnabled = hasSupabasePublicEnv();
   const supabase = getSupabaseBrowserClient();
-  const demoNoteIds = useMemo(() => new Set(demoNotes.map((note) => note.id)), []);
 
   const selectedNote = useMemo(
     () => notes.find((note) => note.id === selectedNoteId) ?? null,
@@ -309,11 +452,23 @@ export function NotesApp() {
   }, [supabaseEnabled]);
 
   useEffect(() => {
-    if (!selectedNoteId && notes.length) {
-      const candidate = notes.find((note) => !note.deletedAt && !note.isArchived) ?? notes[0];
-      setSelectedNoteId(candidate?.id ?? null);
+    if (selectedNoteId && notes.some((note) => note.id === selectedNoteId)) {
+      return;
     }
+
+    const candidate = notes.find((note) => !note.deletedAt && !note.isArchived) ?? notes[0] ?? null;
+    setSelectedNoteId(candidate?.id ?? null);
   }, [notes, selectedNoteId]);
+
+  useEffect(() => {
+    if (folderFilter === "all") {
+      return;
+    }
+
+    if (!folders.some((folder) => folder.id === folderFilter)) {
+      setFolderFilter("all");
+    }
+  }, [folderFilter, folders]);
 
   useEffect(() => {
     if (!supabase) {
@@ -334,8 +489,12 @@ export function NotesApp() {
   }, [supabase]);
 
   useEffect(() => {
-    void clearSeededDemoState(supabaseEnabled, Boolean(session), demoNoteIds).then(loadLocal);
-  }, [demoNoteIds, session, supabaseEnabled]);
+    void purgeLocalDemoState(supabaseEnabled, Boolean(session)).then((changed) => {
+      if (changed) {
+        void loadLocal();
+      }
+    });
+  }, [session, supabaseEnabled]);
 
   async function loadLocal() {
     const [localNotes, localFolders] = await Promise.all([db.notes.toArray(), db.folders.toArray()]);
@@ -407,6 +566,7 @@ export function NotesApp() {
     try {
       const syncStartedAt = nowIso();
       setSyncLabel("Синхронизирую с облаком…");
+      await purgeLocalDemoState(true, true);
       await ensureFoldersQueuedForSync();
       const queue = await db.syncQueue.toArray();
 
@@ -427,23 +587,47 @@ export function NotesApp() {
             await db.notes.put(copy);
           }
         }
-        await db.syncQueue.clear();
+        await settleProcessedQueue(queue);
       }
 
       const snapshot = await pullSnapshot(supabase, session.user.id);
-      const [dirtyNotes, dirtyFolders] = await Promise.all([
-        db.notes
-          .toArray()
-          .then((items) => items.filter((note) => note.syncState !== "synced" && note.updatedAt > syncStartedAt)),
-        db.folders.toArray().then((items) => items.filter((folder) => folder.updatedAt > syncStartedAt)),
-      ]);
+      const cleanedSnapshot = stripSeededDemoData(snapshot.notes, snapshot.folders);
 
-      const mergedFolders = new Map(snapshot.folders.map((folder) => [folder.id, folder]));
+      if (cleanedSnapshot.removedNoteIds.size) {
+        await supabase.from("notes").delete().in("id", [...cleanedSnapshot.removedNoteIds]);
+      }
+
+      if (cleanedSnapshot.removedFolderIds.size) {
+        await supabase.from("folders").delete().in("id", [...cleanedSnapshot.removedFolderIds]);
+      }
+
+      const [localNotesAfterSync, localFoldersAfterSync] = await Promise.all([
+        db.notes.toArray(),
+        db.folders.toArray(),
+      ]);
+      const dirtyNotes = localNotesAfterSync.filter(
+        (note) => note.syncState !== "synced" && note.updatedAt > syncStartedAt,
+      );
+      const dirtyFolders = localFoldersAfterSync.filter((folder) => folder.updatedAt > syncStartedAt);
+
+      const mergedFolders = new Map(localFoldersAfterSync.map((folder) => [folder.id, folder]));
+      for (const folder of cleanedSnapshot.folders) {
+        const local = mergedFolders.get(folder.id);
+        if (!local || local.updatedAt <= folder.updatedAt) {
+          mergedFolders.set(folder.id, folder);
+        }
+      }
       for (const folder of dirtyFolders) {
         mergedFolders.set(folder.id, folder);
       }
 
-      const mergedNotes = new Map(snapshot.notes.map((note) => [note.id, note]));
+      const mergedNotes = new Map(localNotesAfterSync.map((note) => [note.id, note]));
+      for (const note of cleanedSnapshot.notes) {
+        const local = mergedNotes.get(note.id);
+        if (!local || (local.syncState === "synced" && local.version <= note.version)) {
+          mergedNotes.set(note.id, note);
+        }
+      }
       for (const note of dirtyNotes) {
         mergedNotes.set(note.id, note);
       }
@@ -500,11 +684,16 @@ export function NotesApp() {
 
   async function createNote() {
     const timestamp = nowIso();
+    const preferredFolderId =
+      folderFilter !== "all" && folders.some((folder) => folder.id === folderFilter)
+        ? folderFilter
+        : folders[0]?.id ?? null;
+
     const note: Note = {
       id: makeId(),
       userId: session?.user.id ?? null,
       title: "Новая заметка",
-      folderId: folders[0]?.id ?? null,
+      folderId: preferredFolderId,
       tags: [],
       contentJson: emptyDoc(),
       plainText: "",
@@ -533,6 +722,7 @@ export function NotesApp() {
       updatedAt: timestamp,
     };
     await upsertFolder(folder);
+    setFolderFilter(folder.id);
   }
 
   async function mutateSelectedNote(mutator: (note: Note) => Note) {

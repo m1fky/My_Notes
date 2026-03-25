@@ -94,3 +94,28 @@ export const demoNotes: Note[] = [
     reminders: [],
   },
 ];
+
+const demoFolderIdSet = new Set(demoFolders.map((folder) => folder.id));
+const demoFolderSignatureSet = new Set(demoFolders.map((folder) => `${folder.name}::${folder.color}`));
+const demoNoteIdSet = new Set(demoNotes.map((note) => note.id));
+const demoNoteSignatureSet = new Set(demoNotes.map((note) => noteSignature(note)));
+
+function noteSignature(note: Pick<Note, "title" | "plainText" | "tags" | "isPinned" | "isArchived">) {
+  return JSON.stringify({
+    title: note.title.trim(),
+    plainText: note.plainText.trim(),
+    tags: [...note.tags].sort(),
+    isPinned: note.isPinned,
+    isArchived: note.isArchived,
+  });
+}
+
+export function isDemoFolderSeed(folder: Pick<Folder, "id" | "name" | "color">) {
+  return demoFolderIdSet.has(folder.id) || demoFolderSignatureSet.has(`${folder.name}::${folder.color}`);
+}
+
+export function isDemoNoteSeed(
+  note: Pick<Note, "id" | "title" | "plainText" | "tags" | "isPinned" | "isArchived">,
+) {
+  return demoNoteIdSet.has(note.id) || demoNoteSignatureSet.has(noteSignature(note));
+}
