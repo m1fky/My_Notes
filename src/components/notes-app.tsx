@@ -1404,7 +1404,7 @@ export function NotesApp() {
         <aside
           className={cn(
             "glass-panel rounded-[34px] border border-white/10 p-4",
-            "lg:sticky lg:top-[170px] lg:flex lg:h-[calc(100vh-210px)] lg:min-h-0 lg:flex-col lg:overflow-hidden",
+            "lg:sticky lg:top-[170px] lg:h-[calc(100vh-210px)] lg:overflow-y-auto lg:pr-3 lg:pb-3",
             mobileView !== "library" && "hidden lg:block",
           )}
         >
@@ -1485,9 +1485,8 @@ export function NotesApp() {
             />
           </div>
 
-          <div className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden">
-            <div className="space-y-5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
-              <div className="space-y-2">
+          <div className="space-y-5">
+            <div className="space-y-2">
               <button
                 type="button"
                 onClick={() => setFolderFilter("all")}
@@ -1618,74 +1617,73 @@ export function NotesApp() {
                   </div>
                 );
               })}
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm uppercase tracking-[0.24em] text-white/35">Список</p>
+                <span className="text-sm text-white/48">{visibleNotes.length}</span>
               </div>
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm uppercase tracking-[0.24em] text-white/35">Список</p>
-                  <span className="text-sm text-white/48">{visibleNotes.length}</span>
-                </div>
-                <div className="space-y-3">
-                  <AnimatePresence initial={false}>
-                    {visibleNotes.map((note) => (
-                      <motion.button
-                        key={note.id}
-                        layout
-                        onClick={() => {
-                          setSelectedNoteId(note.id);
-                          if (isCompactLayout) {
-                            setMobileView("editor");
-                          }
-                        }}
-                        className={cn(
-                          "w-full rounded-[28px] border px-4 py-4 text-left transition",
-                          selectedNoteId === note.id
-                            ? "border-white/20 bg-white/16"
-                            : "border-white/8 bg-white/6 hover:bg-white/9",
-                        )}
-                      >
-                        <div className="mb-3 flex items-start justify-between gap-3">
-                          <div>
-                            <p className="line-clamp-2 text-base font-medium text-white">{displayTitle(note.title)}</p>
-                            <p className="mt-1 text-xs text-white/42">
-                              {folders.find((folder) => folder.id === note.folderId)?.name ?? "Без папки"}
-                            </p>
-                          </div>
-                          {note.isPinned ? <Star className="h-4 w-4 text-sky-300" /> : null}
-                        </div>
-                        <p className="line-clamp-3 text-sm leading-6 text-white/58">{note.plainText || "Пустая заметка"}</p>
-                        <div className="mt-4 flex flex-wrap items-center gap-2">
-                          {note.tags.slice(0, 2).map((tag) => (
-                            <span key={tag} className="rounded-full bg-white/8 px-3 py-1 text-xs text-white/58">
-                              #{tag}
-                            </span>
-                          ))}
-                          {hasDueReminder(note.reminders) ? (
-                            <span className="rounded-full bg-rose-400/16 px-3 py-1 text-xs text-rose-200">
-                              Reminder due
-                            </span>
-                          ) : null}
-                        </div>
-                      </motion.button>
-                    ))}
-                  </AnimatePresence>
-                </div>
-                {!visibleNotes.length ? (
-                  <div className="rounded-[28px] border border-dashed border-white/14 bg-white/5 px-5 py-8 text-center">
-                    <p className="text-base font-medium text-white">Пока пусто</p>
-                    <p className="mt-2 text-sm leading-6 text-white/56">
-                      Создайте первую заметку или переключитесь на другую папку.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => void createNote()}
-                      className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-white/14 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:border-white/24 hover:bg-white/14"
+                <AnimatePresence initial={false}>
+                  {visibleNotes.map((note) => (
+                    <motion.button
+                      key={note.id}
+                      layout
+                      onClick={() => {
+                        setSelectedNoteId(note.id);
+                        if (isCompactLayout) {
+                          setMobileView("editor");
+                        }
+                      }}
+                      className={cn(
+                        "w-full rounded-[28px] border px-4 py-4 text-left transition",
+                        selectedNoteId === note.id
+                          ? "border-white/20 bg-white/16"
+                          : "border-white/8 bg-white/6 hover:bg-white/9",
+                      )}
                     >
-                      <Plus className="h-4 w-4" />
-                      Создать заметку
-                    </button>
-                  </div>
-                ) : null}
+                      <div className="mb-3 flex items-start justify-between gap-3">
+                        <div>
+                          <p className="line-clamp-2 text-base font-medium text-white">{displayTitle(note.title)}</p>
+                          <p className="mt-1 text-xs text-white/42">
+                            {folders.find((folder) => folder.id === note.folderId)?.name ?? "Без папки"}
+                          </p>
+                        </div>
+                        {note.isPinned ? <Star className="h-4 w-4 text-sky-300" /> : null}
+                      </div>
+                      <p className="line-clamp-3 text-sm leading-6 text-white/58">{note.plainText || "Пустая заметка"}</p>
+                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                        {note.tags.slice(0, 2).map((tag) => (
+                          <span key={tag} className="rounded-full bg-white/8 px-3 py-1 text-xs text-white/58">
+                            #{tag}
+                          </span>
+                        ))}
+                        {hasDueReminder(note.reminders) ? (
+                          <span className="rounded-full bg-rose-400/16 px-3 py-1 text-xs text-rose-200">
+                            Reminder due
+                          </span>
+                        ) : null}
+                      </div>
+                    </motion.button>
+                  ))}
+                </AnimatePresence>
               </div>
+              {!visibleNotes.length ? (
+                <div className="rounded-[28px] border border-dashed border-white/14 bg-white/5 px-5 py-8 text-center">
+                  <p className="text-base font-medium text-white">Пока пусто</p>
+                  <p className="mt-2 text-sm leading-6 text-white/56">
+                    Создайте первую заметку или переключитесь на другую папку.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void createNote()}
+                    className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-white/14 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:border-white/24 hover:bg-white/14"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Создать заметку
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
         </aside>
@@ -1773,7 +1771,7 @@ export function NotesApp() {
         <aside
           className={cn(
             "space-y-4",
-            "lg:self-start lg:pr-1",
+            "lg:sticky lg:top-[170px] lg:h-[calc(100vh-210px)] lg:overflow-y-auto lg:pr-3 lg:pb-3",
             mobileView !== "details" && "hidden lg:block",
           )}
         >
