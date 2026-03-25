@@ -148,9 +148,14 @@ export function NoteEditor({
 
   useEffect(() => {
     if (editor && note) {
-      editor.commands.setContent(note.contentJson ?? emptyDoc(), {
-        emitUpdate: false,
-      });
+      const nextContent = JSON.stringify(note.contentJson ?? emptyDoc());
+      const currentContent = JSON.stringify(editor.getJSON());
+
+      if (currentContent !== nextContent) {
+        editor.commands.setContent(note.contentJson ?? emptyDoc(), {
+          emitUpdate: false,
+        });
+      }
     }
   }, [editor, note]);
 

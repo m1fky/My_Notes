@@ -23,7 +23,6 @@ import {
   Search,
   Settings2,
   Smartphone,
-  Sparkles,
   Star,
   Trash2,
   Wifi,
@@ -1151,7 +1150,6 @@ export function NotesApp() {
     }));
   }
 
-  const selectedFolder = selectedNote ? folders.find((folder) => folder.id === selectedNote.folderId) ?? null : null;
   const selectedReminder = selectedNote?.reminders[0] ?? null;
   const reminderEnabled = Boolean(selectedReminder?.isEnabled);
   const archivedNotesCount = notes.filter((note) => note.isArchived && !note.deletedAt).length;
@@ -1178,8 +1176,7 @@ export function NotesApp() {
           <section className="glass-panel relative overflow-hidden rounded-[36px] border border-white/10 p-8 lg:p-10">
             <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-white/12 to-transparent" />
             <div className="relative space-y-6">
-              <div className="liquid-pill inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-white/80">
-                <Sparkles className="h-4 w-4" />
+              <div className="liquid-pill inline-flex items-center rounded-full px-4 py-2 text-sm text-white/80">
                 iOS Liquid Glass · Android/ПК/iPhone PWA
               </div>
               <div className="max-w-xl space-y-4">
@@ -1267,8 +1264,7 @@ export function NotesApp() {
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-2">
-              <div className="liquid-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs uppercase tracking-[0.22em] text-white/72">
-                <Sparkles className="h-3.5 w-3.5" />
+              <div className="liquid-pill inline-flex items-center rounded-full px-3 py-2 text-xs uppercase tracking-[0.22em] text-white/72">
                 Liquid Notes
               </div>
               <div>
@@ -1419,22 +1415,23 @@ export function NotesApp() {
             />
           </div>
 
-          <div className="mb-5 space-y-2">
-            <button
-              type="button"
-              onClick={() => setFolderFilter("all")}
-              className={cn(
-                "flex w-full items-center justify-between rounded-[22px] px-4 py-3 text-left transition",
-                folderFilter === "all" ? "bg-white/14 text-white" : "text-white/68 hover:bg-white/6",
-              )}
-            >
-              <span className="inline-flex items-center gap-3">
-                <Home className="h-4 w-4" />
-                Все заметки
-              </span>
-              <span>{notes.filter((note) => !note.deletedAt && !note.isArchived).length}</span>
-            </button>
-            {folders.map((folder) => {
+          <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
+            <div className="mb-5 space-y-2">
+              <button
+                type="button"
+                onClick={() => setFolderFilter("all")}
+                className={cn(
+                  "flex w-full items-center justify-between rounded-[22px] px-4 py-3 text-left transition",
+                  folderFilter === "all" ? "bg-white/14 text-white" : "text-white/68 hover:bg-white/6",
+                )}
+              >
+                <span className="inline-flex items-center gap-3">
+                  <Home className="h-4 w-4" />
+                  Все заметки
+                </span>
+                <span>{notes.filter((note) => !note.deletedAt && !note.isArchived).length}</span>
+              </button>
+              {folders.map((folder) => {
               const noteCount = notes.filter((note) => note.folderId === folder.id && !note.deletedAt).length;
               const active = folderFilter === folder.id;
 
@@ -1549,15 +1546,15 @@ export function NotesApp() {
                   </button>
                 </div>
               );
-            })}
-          </div>
-
-          <div className="space-y-3 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
-            <div className="flex items-center justify-between">
-              <p className="text-sm uppercase tracking-[0.24em] text-white/35">Список</p>
-              <span className="text-sm text-white/48">{visibleNotes.length}</span>
+              })}
             </div>
-            <div className="max-h-[58vh] space-y-3 overflow-y-auto pr-1 lg:min-h-0 lg:flex-1 lg:max-h-none">
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm uppercase tracking-[0.24em] text-white/35">Список</p>
+                <span className="text-sm text-white/48">{visibleNotes.length}</span>
+              </div>
+              <div className="max-h-[58vh] space-y-3 overflow-y-auto pr-1 lg:max-h-none lg:overflow-visible">
               <AnimatePresence initial={false}>
                 {visibleNotes.map((note) => (
                   <motion.button
@@ -1601,22 +1598,23 @@ export function NotesApp() {
                   </motion.button>
                 ))}
               </AnimatePresence>
-              {!visibleNotes.length ? (
-                <div className="rounded-[28px] border border-dashed border-white/14 bg-white/5 px-5 py-8 text-center">
-                  <p className="text-base font-medium text-white">Пока пусто</p>
-                  <p className="mt-2 text-sm leading-6 text-white/56">
-                    Создайте первую заметку или переключитесь на другую папку.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => void createNote()}
-                    className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-white/14 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:border-white/24 hover:bg-white/14"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Создать заметку
-                  </button>
-                </div>
-              ) : null}
+                {!visibleNotes.length ? (
+                  <div className="rounded-[28px] border border-dashed border-white/14 bg-white/5 px-5 py-8 text-center">
+                    <p className="text-base font-medium text-white">Пока пусто</p>
+                    <p className="mt-2 text-sm leading-6 text-white/56">
+                      Создайте первую заметку или переключитесь на другую папку.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void createNote()}
+                      className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-white/14 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:border-white/24 hover:bg-white/14"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Создать заметку
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
         </aside>
@@ -1639,10 +1637,6 @@ export function NotesApp() {
                   <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5">
                     <Clock3 className="h-4 w-4" />
                     {formatUpdatedAt(selectedNote.updatedAt)}
-                  </span>
-                  <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5">
-                    <FileText className="h-4 w-4" />
-                    {selectedFolder?.name ?? "Без папки"}
                   </span>
                   <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5">
                     <Cloud className="h-4 w-4" />
@@ -1708,7 +1702,7 @@ export function NotesApp() {
         <aside
           className={cn(
             "space-y-4",
-            "lg:sticky lg:top-[170px] lg:max-h-[calc(100vh-210px)] lg:overflow-y-auto",
+            "lg:sticky lg:top-[170px] lg:max-h-[calc(100vh-210px)] lg:overflow-y-auto lg:pr-1 lg:pb-3",
             mobileView !== "details" && "hidden lg:block",
           )}
         >
@@ -1742,9 +1736,7 @@ export function NotesApp() {
 
                 <div className="rounded-[24px] border border-white/10 bg-white/6 p-4 text-sm leading-6 text-white/60">
                   <p className="text-xs uppercase tracking-[0.2em] text-white/34">Статус</p>
-                  <p className="mt-2 text-base font-medium text-white">
-                    {selectedFolder?.name ?? "Без папки"} · {formatNoteSyncState(selectedNote.syncState)}
-                  </p>
+                  <p className="mt-2 text-base font-medium text-white">{formatNoteSyncState(selectedNote.syncState)}</p>
                   <p className="mt-1">Обновлено {formatUpdatedAt(selectedNote.updatedAt)}</p>
                 </div>
                 <div className="space-y-2">
@@ -1759,7 +1751,7 @@ export function NotesApp() {
                       void mutateSelectedNote((note) => ({ ...note, tags }));
                     }}
                     className="w-full rounded-[20px] border border-white/10 bg-white/7 px-4 py-3 text-white outline-none placeholder:text-white/26"
-                    placeholder="работа, идеи, личное"
+                    placeholder="Через запятую: работа, идеи, личное"
                   />
                 </div>
 
