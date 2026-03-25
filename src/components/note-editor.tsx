@@ -1,13 +1,24 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import Link from "@tiptap/extension-link";
 import { EditorContent, JSONContent, useEditor } from "@tiptap/react";
 import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import StarterKit from "@tiptap/starter-kit";
 import TaskItem from "@tiptap/extension-task-item";
 import TaskList from "@tiptap/extension-task-list";
-import { ImagePlus, Link2, List, ListChecks, Pilcrow, TextQuote } from "lucide-react";
+import {
+  Bold,
+  Heading1,
+  Heading2,
+  ImagePlus,
+  Link2,
+  List,
+  ListChecks,
+  Pilcrow,
+  TextQuote,
+} from "lucide-react";
 
 import { emptyDoc, extractPlainText } from "@/lib/editor";
 import type { Note } from "@/lib/types";
@@ -17,7 +28,7 @@ interface NoteEditorProps {
   note: Note | null;
   onTitleChange: (title: string) => void;
   onContentChange: (content: JSONContent, plainText: string) => void;
-  onAddImages: (files: FileList | null) => void;
+  onAddImages: (files: FileList | null) => Promise<void>;
 }
 
 function ToolbarButton({
@@ -55,12 +66,29 @@ export function NoteEditor({
 }: NoteEditorProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  async function handleImagePick(files: FileList | null) {
+    if (!files?.length) {
+      return;
+    }
+
+    await onAddImages(files);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
         heading: {
           levels: [1, 2, 3],
         },
+      }),
+      Link.configure({
+        autolink: true,
+        defaultProtocol: "https",
+        openOnClick: false,
       }),
       Placeholder.configure({
         placeholder: "Запишите мысль, список дел или план на день...",
@@ -111,49 +139,101 @@ export function NoteEditor({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-2 rounded-[18px] border border-white/12 bg-white/9 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/14"
+            className="inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-white/12 bg-white/9 px-4 py-2 text-sm font-medium text-white transition hover:border-white/24 hover:bg-white/14"
           >
             <ImagePlus className="h-4 w-4" />
-            Фото
+            Вставить фото
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-        <ToolbarButton label="Параграф" onClick={() => editor?.chain().focus().setParagraph().run()}>
-          <Pilcrow className="h-4 w-4" />
-        </ToolbarButton>
-        <ToolbarButton
-          active={editor?.isActive("bulletList")}
-          label="Список"
-          onClick={() => editor?.chain().focus().toggleBulletList().run()}
-        >
-          <List className="h-4 w-4" />
-        </ToolbarButton>
-        <ToolbarButton
-          active={editor?.isActive("taskList")}
-          label="Чеклист"
-          onClick={() => editor?.chain().focus().toggleTaskList().run()}
-        >
-          <ListChecks className="h-4 w-4" />
-        </ToolbarButton>
-        <ToolbarButton
-          active={editor?.isActive("blockquote")}
-          label="Цитата"
-          onClick={() => editor?.chain().focus().toggleBlockquote().run()}
-        >
-          <TextQuote className="h-4 w-4" />
-        </ToolbarButton>
-        <ToolbarButton
-          active={editor?.isActive("link")}
-          label="Ссылка"
-          onClick={() => {
-            const value = window.prompt("Вставьте URL");
-            if (value) {
-              editor?.chain().focus().setLink({ href: value }).run();
-            }
-          }}
-        >
-          <Link2 className="h-4 w-4" />
-        </ToolbarButton>
+          <ToolbarButton
+            active={editor?.isActive("paragraph")}
+            label="Текст"
+            onClick={() => editor?.chain().focus().setParagraph().run()}
+          >
+            <Pilcrow className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            active={editor?.isActive("heading", { level: 1 })}
+            label="H1"
+            onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
+          >
+            <Heading1 className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            active={editor?.isActive("heading", { level: 2 })}
+            label="H2"
+            onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
+          >
+            <Heading2 className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            active={editor?.isActive("bold")}
+            label="Жирный"
+            onClick={() => editor?.chain().focus().toggleBold().run()}
+          >
+            <Bold className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            active={editor?.isActive("bulletList")}
+            label="Список"
+            onClick={() => editor?.chain().focus().toggleBulletList().run()}
+          >
+            <List className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            active={editor?.isActive("taskList")}
+            label="Чеклист"
+            onClick={() => editor?.chain().focus().toggleTaskList().run()}
+          >
+            <ListChecks className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            active={editor?.isActive("blockquote")}
+            label="Цитата"
+            onClick={() => editor?.chain().focus().toggleBlockquote().run()}
+          >
+            <TextQuote className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            active={editor?.isActive("link")}
+            label={editor?.isActive("link") ? "Убрать ссылку" : "Ссылка"}
+            onClick={() => {
+              if (!editor) {
+                return;
+              }
+
+              if (editor.isActive("link")) {
+                editor.chain().focus().unsetLink().run();
+                return;
+              }
+
+              const value = window.prompt("Вставьте URL");
+              if (!value) {
+                return;
+              }
+
+              const normalizedValue = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+              const selectionEmpty = editor.state.selection.empty;
+
+              if (selectionEmpty) {
+                editor
+                  .chain()
+                  .focus()
+                  .insertContent({
+                    type: "text",
+                    text: normalizedValue,
+                    marks: [{ type: "link", attrs: { href: normalizedValue } }],
+                  })
+                  .run();
+                return;
+              }
+
+              editor.chain().focus().extendMarkRange("link").setLink({ href: normalizedValue }).run();
+            }}
+          >
+            <Link2 className="h-4 w-4" />
+          </ToolbarButton>
         </div>
         <input
           ref={fileInputRef}
@@ -161,7 +241,7 @@ export function NoteEditor({
           accept="image/*"
           multiple
           className="hidden"
-          onChange={(event) => onAddImages(event.target.files)}
+          onChange={(event) => void handleImagePick(event.target.files)}
         />
       </div>
 

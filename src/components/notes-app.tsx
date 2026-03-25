@@ -4,20 +4,28 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { AnimatePresence, motion } from "motion/react";
 import {
+  ArrowLeft,
   Archive,
   Bell,
+  Clock3,
   CheckCircle2,
   Cloud,
   CloudOff,
+  FileText,
   FolderPlus,
   Home,
   LoaderCircle,
   LogOut,
+  Pencil,
+  Pin,
+  PinOff,
   Plus,
   Search,
+  Settings2,
   Smartphone,
   Sparkles,
   Star,
+  Trash2,
   Wifi,
   WifiOff,
 } from "lucide-react";
@@ -373,6 +381,53 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function formatUpdatedAt(value?: string | null) {
+  if (!value) {
+    return "Только что";
+  }
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function appendImagesToDoc(
+  contentJson: Note["contentJson"],
+  attachments: Array<Pick<Note["attachments"][number], "name" | "sourceUrl">>,
+) {
+  const normalizedDoc =
+    contentJson?.type === "doc"
+      ? {
+          ...contentJson,
+          content: [...(contentJson.content ?? [])],
+        }
+      : emptyDoc();
+
+  return {
+    ...normalizedDoc,
+    type: "doc" as const,
+    content: [
+      ...(normalizedDoc.content ?? []),
+      ...attachments.flatMap((attachment) => [
+        {
+          type: "image" as const,
+          attrs: {
+            src: attachment.sourceUrl,
+            alt: attachment.name,
+            title: attachment.name,
+          },
+        },
+        {
+          type: "paragraph" as const,
+        },
+      ]),
+    ],
+  };
+}
+
 export function NotesApp() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -391,6 +446,8 @@ export function NotesApp() {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [notificationStatus, setNotificationStatus] = useState<NotificationPermission>("default");
   const [syncRequest, setSyncRequest] = useState(0);
+  const [mobileView, setMobileView] = useState<"library" | "editor" | "details">("library");
+  const [isCompactLayout, setIsCompactLayout] = useState(false);
   const syncInFlightRef = useRef(false);
 
   const supabaseEnabled = hasSupabasePublicEnv();
@@ -440,6 +497,22 @@ export function NotesApp() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia("(max-width: 1023px)");
+    const updateLayout = () => setIsCompactLayout(mediaQuery.matches);
+
+    updateLayout();
+    mediaQuery.addEventListener("change", updateLayout);
+
+    return () => {
+      mediaQuery.removeEventListener("change", updateLayout);
+    };
+  }, []);
+
+  useEffect(() => {
     const bootstrap = async () => {
       await ensureSeededData(!supabaseEnabled);
       await normalizeLegacyLocalIds();
@@ -469,6 +542,17 @@ export function NotesApp() {
       setFolderFilter("all");
     }
   }, [folderFilter, folders]);
+
+  useEffect(() => {
+    if (!isCompactLayout) {
+      setMobileView("editor");
+      return;
+    }
+
+    if (!selectedNote) {
+      setMobileView("library");
+    }
+  }, [isCompactLayout, selectedNote]);
 
   useEffect(() => {
     if (!supabase) {
@@ -532,6 +616,77 @@ export function NotesApp() {
       createdAt: folder.updatedAt,
     });
     await loadLocal();
+    if (isOnline && supabase && session) {
+      setSyncRequest(Date.now());
+    }
+  }
+
+  async function renameFolder(folder: Folder) {
+    const nextName = window.prompt("Название папки", folder.name)?.trim();
+
+    if (!nextName || nextName === folder.name) {
+      return;
+    }
+
+    await upsertFolder({
+      ...folder,
+      name: nextName,
+      updatedAt: nowIso(),
+    });
+  }
+
+  async function deleteFolder(folder: Folder) {
+    const confirmed = window.confirm(
+      `Удалить папку «${folder.name}»? Заметки останутся, но будут перемещены в «Без папки».`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const timestamp = nowIso();
+    const linkedNotes = (await db.notes.toArray()).filter((note) => note.folderId === folder.id && !note.deletedAt);
+    const updatedNotes: Note[] = linkedNotes.map((note) => ({
+      ...note,
+      folderId: null,
+      updatedAt: timestamp,
+      version: note.version + 1,
+      syncState: note.syncState === "conflicted" ? "conflicted" : "queued",
+    }));
+
+    await db.transaction("rw", db.folders, db.notes, db.syncQueue, async () => {
+      await db.folders.delete(folder.id);
+      await db.syncQueue.put({
+        id: `queue-folder-${folder.id}`,
+        entity: "folder",
+        operation: "delete",
+        payload: {
+          ...folder,
+          updatedAt: timestamp,
+        },
+        createdAt: timestamp,
+      });
+
+      if (updatedNotes.length) {
+        await db.notes.bulkPut(updatedNotes);
+        await db.syncQueue.bulkPut(
+          updatedNotes.map((note) => ({
+            id: `queue-note-${note.id}`,
+            entity: "note" as const,
+            operation: "upsert" as const,
+            payload: note,
+            createdAt: note.updatedAt,
+          })),
+        );
+      }
+    });
+
+    if (folderFilter === folder.id) {
+      setFolderFilter("all");
+    }
+
+    await loadLocal();
+
     if (isOnline && supabase && session) {
       setSyncRequest(Date.now());
     }
@@ -709,20 +864,33 @@ export function NotesApp() {
     };
     await upsertNote(note);
     setSelectedNoteId(note.id);
+    if (isCompactLayout) {
+      setMobileView("editor");
+    }
   }
 
   async function createFolder() {
+    const suggestedName = `Папка ${folders.length + 1}`;
+    const name = window.prompt("Название новой папки", suggestedName)?.trim();
+
+    if (!name) {
+      return;
+    }
+
     const timestamp = nowIso();
     const folder: Folder = {
       id: makeId(),
       userId: session?.user.id ?? null,
-      name: `Папка ${folders.length + 1}`,
+      name,
       color: folderColors[folders.length % folderColors.length],
       createdAt: timestamp,
       updatedAt: timestamp,
     };
     await upsertFolder(folder);
     setFolderFilter(folder.id);
+    if (isCompactLayout) {
+      setMobileView("library");
+    }
   }
 
   async function mutateSelectedNote(mutator: (note: Note) => Note) {
@@ -866,7 +1034,19 @@ export function NotesApp() {
 
     await mutateSelectedNote((note) => ({
       ...note,
+      contentJson: appendImagesToDoc(note.contentJson, attachments),
       attachments: [...note.attachments, ...attachments],
+    }));
+  }
+
+  async function removeAttachment(attachmentId: string) {
+    if (!selectedNote) {
+      return;
+    }
+
+    await mutateSelectedNote((note) => ({
+      ...note,
+      attachments: note.attachments.filter((attachment) => attachment.id !== attachmentId),
     }));
   }
 
@@ -891,6 +1071,21 @@ export function NotesApp() {
       reminders: [nextReminder],
     }));
   }
+
+  async function clearReminder() {
+    if (!selectedNote) {
+      return;
+    }
+
+    await mutateSelectedNote((note) => ({
+      ...note,
+      reminders: [],
+    }));
+  }
+
+  const selectedFolder = selectedNote ? folders.find((folder) => folder.id === selectedNote.folderId) ?? null : null;
+  const selectedReminder = selectedNote?.reminders[0] ?? null;
+  const archivedNotesCount = notes.filter((note) => note.isArchived && !note.deletedAt).length;
 
   const isIos =
     typeof navigator !== "undefined" &&
@@ -999,21 +1194,107 @@ export function NotesApp() {
   }
 
   return (
-    <main className="safe-shell mx-auto flex min-h-screen max-w-[1600px] flex-col gap-4 px-3 py-3 md:px-5 md:py-5">
+    <main className="safe-shell mx-auto flex min-h-screen max-w-[1600px] flex-col gap-4 px-3 py-3 pb-28 md:px-5 md:py-5 md:pb-5">
+      <div className="glass-panel sticky top-[max(12px,env(safe-area-inset-top))] z-20 rounded-[30px] border border-white/10 px-4 py-4 md:px-5">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-2">
+              <div className="liquid-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs uppercase tracking-[0.22em] text-white/72">
+                <Sparkles className="h-3.5 w-3.5" />
+                Liquid Notes
+              </div>
+              <div>
+                <p className="text-2xl font-semibold tracking-[-0.05em] text-white">
+                  {selectedNote ? selectedNote.title : "Коллекция заметок"}
+                </p>
+                <p className="mt-1 text-sm text-white/54">
+                  {selectedNote
+                    ? `${selectedFolder?.name ?? "Без папки"} · обновлено ${formatUpdatedAt(selectedNote.updatedAt)}`
+                    : "Local-first заметки с синхронизацией, push и установкой как PWA"}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {!isCompactLayout && installPrompt ? (
+                <button
+                  type="button"
+                  onClick={promptInstall}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-white/14 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:border-white/24 hover:bg-white/14"
+                >
+                  <Smartphone className="h-4 w-4" />
+                  Установить
+                </button>
+              ) : null}
+              {!isCompactLayout ? (
+                <button
+                  type="button"
+                  onClick={enableNotifications}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-white/12 bg-white/6 px-4 py-2 text-sm font-medium text-white/78 transition hover:border-white/22 hover:bg-white/10 hover:text-white"
+                >
+                  <Bell className="h-4 w-4" />
+                  Push
+                </button>
+              ) : null}
+              {session ? (
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-white/12 bg-white/6 px-4 py-2 text-sm font-medium text-white/72 transition hover:border-white/22 hover:bg-white/10 hover:text-white"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Выйти
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="liquid-pill inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-white/72">
+              {isOnline ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
+              {isOnline ? "Онлайн" : "Оффлайн"}
+            </span>
+            <span className="liquid-pill inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-white/72">
+              {supabaseEnabled ? <Cloud className="h-4 w-4" /> : <CloudOff className="h-4 w-4" />}
+              {syncLabel}
+            </span>
+            <span className="liquid-pill inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-white/72">
+              <Bell className="h-4 w-4" />
+              {notificationStatus === "granted" ? "Push включен" : "Push не включен"}
+            </span>
+            <span className="liquid-pill inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-white/72">
+              <Archive className="h-4 w-4" />
+              Архив: {archivedNotesCount}
+            </span>
+          </div>
+        </div>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)_320px]">
-        <aside className="glass-panel rounded-[34px] border border-white/10 p-4">
-          <div className="mb-4 flex items-center justify-between">
+        <aside className={cn("glass-panel rounded-[34px] border border-white/10 p-4", mobileView !== "library" && "hidden lg:block")}>
+          <div className="mb-4 space-y-3">
             <div>
               <p className="text-sm uppercase tracking-[0.24em] text-white/40">Liquid Notes</p>
               <h1 className="mt-1 text-3xl font-semibold tracking-[-0.05em] text-white">Ваши заметки</h1>
             </div>
-            <button
-              type="button"
-              onClick={createNote}
-              className="liquid-pill inline-flex h-11 w-11 items-center justify-center rounded-2xl"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => void createNote()}
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[22px] border border-white/14 bg-white/10 px-4 py-3 text-sm font-medium text-white transition hover:border-white/24 hover:bg-white/14"
+              >
+                <Plus className="h-4 w-4" />
+                Новая заметка
+              </button>
+              <button
+                type="button"
+                onClick={() => void createFolder()}
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[22px] border border-white/12 bg-white/6 px-4 py-3 text-sm font-medium text-white/78 transition hover:border-white/22 hover:bg-white/10 hover:text-white"
+              >
+                <FolderPlus className="h-4 w-4" />
+                Папка
+              </button>
+            </div>
           </div>
 
           <div className="mb-4 flex items-center gap-2 rounded-[24px] border border-white/10 bg-white/7 px-4 py-3 text-white/58">
@@ -1041,34 +1322,50 @@ export function NotesApp() {
               </span>
               <span>{notes.filter((note) => !note.deletedAt && !note.isArchived).length}</span>
             </button>
-            {folders.map((folder) => (
-              <button
-                type="button"
-                key={folder.id}
-                onClick={() => setFolderFilter(folder.id)}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-[22px] px-4 py-3 text-left transition",
-                  folderFilter === folder.id ? "bg-white/14 text-white" : "text-white/68 hover:bg-white/6",
-                )}
-              >
-                <span className="inline-flex items-center gap-3">
-                  <span
-                    className="h-3 w-3 rounded-full"
-                    style={{ backgroundColor: folder.color }}
-                  />
-                  {folder.name}
-                </span>
-                <span>{notes.filter((note) => note.folderId === folder.id && !note.deletedAt).length}</span>
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={createFolder}
-              className="inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm text-white/58 transition hover:bg-white/6 hover:text-white"
-            >
-              <FolderPlus className="h-4 w-4" />
-              Добавить папку
-            </button>
+            {folders.map((folder) => {
+              const noteCount = notes.filter((note) => note.folderId === folder.id && !note.deletedAt).length;
+              const active = folderFilter === folder.id;
+
+              return (
+                <div
+                  key={folder.id}
+                  className={cn(
+                    "flex items-center gap-2 rounded-[22px] border px-2 py-2 transition",
+                    active
+                      ? "border-white/18 bg-white/14 text-white"
+                      : "border-white/8 bg-white/4 text-white/68 hover:bg-white/8",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setFolderFilter(folder.id)}
+                    className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-[18px] px-2 py-2 text-left"
+                  >
+                    <span className="inline-flex min-w-0 items-center gap-3">
+                      <span className="h-3 w-3 rounded-full" style={{ backgroundColor: folder.color }} />
+                      <span className="truncate">{folder.name}</span>
+                    </span>
+                    <span className="text-sm text-white/48">{noteCount}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void renameFolder(folder)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-[16px] border border-white/10 bg-white/6 text-white/62 transition hover:border-white/20 hover:bg-white/12 hover:text-white"
+                    aria-label={`Переименовать папку ${folder.name}`}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void deleteFolder(folder)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-[16px] border border-rose-300/12 bg-rose-400/8 text-rose-100/78 transition hover:border-rose-300/20 hover:bg-rose-400/14 hover:text-rose-50"
+                    aria-label={`Удалить папку ${folder.name}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
 
           <div className="space-y-3">
@@ -1082,7 +1379,12 @@ export function NotesApp() {
                   <motion.button
                     key={note.id}
                     layout
-                    onClick={() => setSelectedNoteId(note.id)}
+                    onClick={() => {
+                      setSelectedNoteId(note.id);
+                      if (isCompactLayout) {
+                        setMobileView("editor");
+                      }
+                    }}
                     className={cn(
                       "w-full rounded-[28px] border px-4 py-4 text-left transition",
                       selectedNoteId === note.id
@@ -1115,39 +1417,102 @@ export function NotesApp() {
                   </motion.button>
                 ))}
               </AnimatePresence>
+              {!visibleNotes.length ? (
+                <div className="rounded-[28px] border border-dashed border-white/14 bg-white/5 px-5 py-8 text-center">
+                  <p className="text-base font-medium text-white">Пока пусто</p>
+                  <p className="mt-2 text-sm leading-6 text-white/56">
+                    Создайте первую заметку или переключитесь на другую папку.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void createNote()}
+                    className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-white/14 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:border-white/24 hover:bg-white/14"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Создать заметку
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
         </aside>
 
-        <section className="space-y-4">
-          <div className="glass-panel flex flex-wrap items-center justify-between gap-3 rounded-[30px] border border-white/10 px-5 py-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="liquid-pill inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-white/72">
-                {isOnline ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
-                {isOnline ? "Онлайн" : "Оффлайн"}
-              </span>
-              <span className="liquid-pill inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-white/72">
-                {supabaseEnabled ? <Cloud className="h-4 w-4" /> : <CloudOff className="h-4 w-4" />}
-                {syncLabel}
-              </span>
-              <span className="liquid-pill inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-white/72">
-                <Bell className="h-4 w-4" />
-                {notificationStatus === "granted" ? "Push включен" : "Push не включен"}
-              </span>
+        <section className={cn("space-y-4", mobileView !== "editor" && "hidden lg:block")}>
+          {selectedNote ? (
+            <div className="glass-panel rounded-[30px] border border-white/10 px-5 py-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-white/56">
+                    {isCompactLayout ? (
+                      <button
+                        type="button"
+                        onClick={() => setMobileView("library")}
+                        className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-white/72 transition hover:bg-white/10 hover:text-white"
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+                        К списку
+                      </button>
+                    ) : null}
+                    <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5">
+                      <Clock3 className="h-4 w-4" />
+                      {formatUpdatedAt(selectedNote.updatedAt)}
+                    </span>
+                    <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5">
+                      <FileText className="h-4 w-4" />
+                      {selectedFolder?.name ?? "Без папки"}
+                    </span>
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-semibold tracking-[-0.04em] text-white">{selectedNote.title}</h2>
+                    <p className="mt-1 text-sm leading-6 text-white/58">
+                      {selectedNote.plainText
+                        ? selectedNote.plainText.slice(0, 140)
+                        : "Здесь можно быстро писать идеи, списки и напоминания."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void mutateSelectedNote((note) => ({
+                        ...note,
+                        isPinned: !note.isPinned,
+                      }))
+                    }
+                    className="inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-white/12 bg-white/7 px-4 py-2 text-sm font-medium text-white/74 transition hover:border-white/22 hover:bg-white/12 hover:text-white"
+                  >
+                    {selectedNote.isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+                    {selectedNote.isPinned ? "Открепить" : "Закрепить"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void mutateSelectedNote((note) => ({
+                        ...note,
+                        isArchived: !note.isArchived,
+                      }))
+                    }
+                    className="inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-white/12 bg-white/7 px-4 py-2 text-sm font-medium text-white/74 transition hover:border-white/22 hover:bg-white/12 hover:text-white"
+                  >
+                    <Archive className="h-4 w-4" />
+                    {selectedNote.isArchived ? "Вернуть" : "В архив"}
+                  </button>
+                  {isCompactLayout ? (
+                    <button
+                      type="button"
+                      onClick={() => setMobileView("details")}
+                      className="inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-white/12 bg-white/7 px-4 py-2 text-sm font-medium text-white/74 transition hover:border-white/22 hover:bg-white/12 hover:text-white"
+                    >
+                      <Settings2 className="h-4 w-4" />
+                      Свойства
+                    </button>
+                  ) : null}
+                </div>
+              </div>
             </div>
-            {session ? (
-              <button
-                type="button"
-                onClick={logout}
-                className="inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm text-white/58 transition hover:bg-white/8 hover:text-white"
-              >
-                <LogOut className="h-4 w-4" />
-                Выйти
-              </button>
-            ) : (
-              <span className="text-sm text-white/48">Demo mode без облака</span>
-            )}
-          </div>
+          ) : null}
 
           <NoteEditor
             note={selectedNote}
@@ -1162,13 +1527,28 @@ export function NotesApp() {
 
           {selectedNote?.attachments.length ? (
             <div className="glass-panel rounded-[30px] border border-white/10 p-4">
-              <p className="mb-3 text-sm uppercase tracking-[0.24em] text-white/36">Изображения</p>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <p className="text-sm uppercase tracking-[0.24em] text-white/36">Изображения</p>
+                <span className="text-sm text-white/48">{selectedNote.attachments.length}</span>
+              </div>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {selectedNote.attachments.map((attachment) => (
                   <div key={attachment.id} className="overflow-hidden rounded-[24px] border border-white/10 bg-white/6">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={attachment.sourceUrl} alt={attachment.name} className="h-44 w-full object-cover" />
-                    <div className="px-4 py-3 text-sm text-white/62">{attachment.name}</div>
+                    <div className="flex items-center justify-between gap-3 px-4 py-3">
+                      <div className="min-w-0 text-sm text-white/62">
+                        <p className="truncate">{attachment.name}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void removeAttachment(attachment.id)}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-[14px] border border-rose-300/12 bg-rose-400/8 text-rose-100/80 transition hover:border-rose-300/20 hover:bg-rose-400/14 hover:text-rose-50"
+                        aria-label={`Удалить изображение ${attachment.name}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1176,47 +1556,21 @@ export function NotesApp() {
           ) : null}
         </section>
 
-        <aside className="space-y-4">
+        <aside className={cn("space-y-4", mobileView !== "details" && "hidden lg:block")}>
           <div className="glass-panel rounded-[34px] border border-white/10 p-5">
-            <p className="text-sm uppercase tracking-[0.24em] text-white/36">Onboarding</p>
-            <div className="mt-4 space-y-3 text-sm leading-6 text-white/64">
-              <div className="rounded-[26px] border border-white/10 bg-white/6 p-4">
-                <div className="mb-2 inline-flex items-center gap-2 text-white">
-                  <Smartphone className="h-4 w-4" />
-                  Установка на главный экран
-                </div>
-                {installPrompt ? (
-                  <button
-                    type="button"
-                    onClick={promptInstall}
-                    className="mt-3 w-full rounded-[20px] bg-white/92 px-4 py-3 font-medium text-slate-950"
-                  >
-                    Установить PWA
-                  </button>
-                ) : isIos ? (
-                  <p>На iPhone/iPad откройте Share и выберите “На экран Домой”.</p>
-                ) : (
-                  <p>PWA уже установлена либо браузер не отдал install prompt.</p>
-                )}
-              </div>
-              <div className="rounded-[26px] border border-white/10 bg-white/6 p-4">
-                <div className="mb-2 inline-flex items-center gap-2 text-white">
-                  <Bell className="h-4 w-4" />
-                  Уведомления
-                </div>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm uppercase tracking-[0.24em] text-white/36">Свойства</p>
+              {isCompactLayout && selectedNote ? (
                 <button
                   type="button"
-                  onClick={enableNotifications}
-                  className="mt-3 w-full rounded-[20px] border border-white/12 px-4 py-3 text-white transition hover:bg-white/10"
+                  onClick={() => setMobileView("editor")}
+                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-sm text-white/72 transition hover:bg-white/10 hover:text-white"
                 >
-                  Включить push
+                  <ArrowLeft className="h-4 w-4" />
+                  К заметке
                 </button>
-              </div>
+              ) : null}
             </div>
-          </div>
-
-          <div className="glass-panel rounded-[34px] border border-white/10 p-5">
-            <p className="text-sm uppercase tracking-[0.24em] text-white/36">Inspector</p>
             {selectedNote ? (
               <div className="mt-4 space-y-4">
                 <div className="space-y-2">
@@ -1231,25 +1585,8 @@ export function NotesApp() {
                       void mutateSelectedNote((note) => ({ ...note, tags }));
                     }}
                     className="w-full rounded-[20px] border border-white/10 bg-white/7 px-4 py-3 text-white outline-none placeholder:text-white/26"
-                    placeholder="pwa, ideas, personal"
+                    placeholder="работа, идеи, личное"
                   />
-                </div>
-
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    onClick={() => void mutateSelectedNote((note) => ({ ...note, isPinned: !note.isPinned }))}
-                    className="rounded-[20px] border border-white/10 bg-white/7 px-4 py-3 text-sm text-white/72 transition hover:bg-white/10"
-                  >
-                    {selectedNote.isPinned ? "Открепить" : "Закрепить"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void mutateSelectedNote((note) => ({ ...note, isArchived: !note.isArchived }))}
-                    className="rounded-[20px] border border-white/10 bg-white/7 px-4 py-3 text-sm text-white/72 transition hover:bg-white/10"
-                  >
-                    {selectedNote.isArchived ? "Вернуть из архива" : "В архив"}
-                  </button>
                 </div>
 
                 <div className="space-y-2">
@@ -1274,15 +1611,26 @@ export function NotesApp() {
                 </div>
 
                 <div className="space-y-3 rounded-[26px] border border-white/10 bg-white/6 p-4">
-                  <div className="flex items-center gap-2 text-white">
-                    <Bell className="h-4 w-4" />
-                    Напоминание
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="inline-flex items-center gap-2 text-white">
+                      <Bell className="h-4 w-4" />
+                      Напоминание
+                    </div>
+                    {selectedReminder ? (
+                      <button
+                        type="button"
+                        onClick={() => void clearReminder()}
+                        className="text-sm text-white/56 transition hover:text-white"
+                      >
+                        Очистить
+                      </button>
+                    ) : null}
                   </div>
                   <input
                     type="datetime-local"
                     value={
-                      selectedNote.reminders[0]?.fireAt
-                        ? selectedNote.reminders[0].fireAt.slice(0, 16)
+                      selectedReminder?.fireAt
+                        ? selectedReminder.fireAt.slice(0, 16)
                         : new Date(Date.now() + 3600_000).toISOString().slice(0, 16)
                     }
                     onChange={(event) =>
@@ -1293,7 +1641,7 @@ export function NotesApp() {
                     className="w-full rounded-[20px] border border-white/10 bg-white/7 px-4 py-3 text-white outline-none"
                   />
                   <select
-                    value={selectedNote.reminders[0]?.repeatRule ?? "none"}
+                    value={selectedReminder?.repeatRule ?? "none"}
                     onChange={(event) =>
                       void updateReminder({
                         repeatRule: event.target.value as Reminder["repeatRule"],
@@ -1305,7 +1653,7 @@ export function NotesApp() {
                     <option value="daily">Каждый день</option>
                     <option value="weekly">Каждую неделю</option>
                   </select>
-                  <div className="text-sm text-white/54">{formatReminder(selectedNote.reminders[0])}</div>
+                  <div className="text-sm text-white/54">{formatReminder(selectedReminder ?? undefined)}</div>
                 </div>
 
                 <button
@@ -1322,24 +1670,85 @@ export function NotesApp() {
                 </button>
               </div>
             ) : (
-              <p className="mt-4 text-sm leading-6 text-white/56">Свойства заметки появятся здесь.</p>
+              <p className="mt-4 text-sm leading-6 text-white/56">
+                Выберите заметку, чтобы управлять тегами, папкой и напоминанием.
+              </p>
             )}
           </div>
 
           <div className="glass-panel rounded-[34px] border border-white/10 p-5">
-            <p className="text-sm uppercase tracking-[0.24em] text-white/36">Status</p>
+            <p className="text-sm uppercase tracking-[0.24em] text-white/36">Устройство</p>
+            <div className="mt-4 space-y-3 text-sm leading-6 text-white/64">
+              <div className="rounded-[26px] border border-white/10 bg-white/6 p-4">
+                <div className="mb-2 inline-flex items-center gap-2 text-white">
+                  <Smartphone className="h-4 w-4" />
+                  Установка на главный экран
+                </div>
+                {installPrompt ? (
+                  <button
+                    type="button"
+                    onClick={promptInstall}
+                    className="mt-3 w-full rounded-[20px] bg-white/92 px-4 py-3 font-medium text-slate-950"
+                  >
+                    Установить PWA
+                  </button>
+                ) : isIos ? (
+                  <p>Откройте Share и выберите «На экран Домой», чтобы установить приложение.</p>
+                ) : (
+                  <p>PWA уже установлена или браузер сейчас не показывает install prompt.</p>
+                )}
+              </div>
+              <div className="rounded-[26px] border border-white/10 bg-white/6 p-4">
+                <div className="mb-2 inline-flex items-center gap-2 text-white">
+                  <Bell className="h-4 w-4" />
+                  Уведомления
+                </div>
+                <button
+                  type="button"
+                  onClick={enableNotifications}
+                  className="mt-3 w-full rounded-[20px] border border-white/12 px-4 py-3 text-white transition hover:bg-white/10"
+                >
+                  {notificationStatus === "granted" ? "Проверить push" : "Включить push"}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="glass-panel rounded-[34px] border border-white/10 p-5">
+            <p className="text-sm uppercase tracking-[0.24em] text-white/36">Как это работает</p>
             <div className="mt-4 space-y-3 text-sm leading-6 text-white/64">
               <div className="flex items-start gap-3 rounded-[24px] border border-white/10 bg-white/6 p-4">
                 <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-300" />
-                Local-first редактирование активно через IndexedDB.
+                Изменения сначала пишутся локально, поэтому редактор ощущается мгновенным даже без сети.
               </div>
               <div className="flex items-start gap-3 rounded-[24px] border border-white/10 bg-white/6 p-4">
                 <Archive className="mt-0.5 h-4 w-4 text-sky-300" />
-                Cloud sync, auth и realtime включаются после настройки env Supabase.
+                При появлении интернета заметки и папки синхронизируются между устройствами через облако.
               </div>
             </div>
           </div>
         </aside>
+      </div>
+
+      <div className="glass-panel fixed inset-x-3 bottom-[max(12px,env(safe-area-inset-bottom))] z-30 grid grid-cols-3 gap-2 rounded-[26px] border border-white/10 p-2 lg:hidden">
+        {[
+          { view: "library" as const, label: "Заметки", icon: Home },
+          { view: "editor" as const, label: "Редактор", icon: FileText },
+          { view: "details" as const, label: "Свойства", icon: Settings2 },
+        ].map(({ view, label, icon: Icon }) => (
+          <button
+            key={view}
+            type="button"
+            onClick={() => setMobileView(view)}
+            className={cn(
+              "inline-flex min-h-12 items-center justify-center gap-2 rounded-[20px] px-3 py-3 text-sm font-medium transition",
+              mobileView === view ? "bg-white/16 text-white" : "text-white/56",
+            )}
+          >
+            <Icon className="h-4 w-4" />
+            {label}
+          </button>
+        ))}
       </div>
     </main>
   );

@@ -168,6 +168,12 @@ export async function flushQueue(
   for (const item of queue.sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
     if (item.entity === "folder" && !isNote(item.payload)) {
       const folder = item.payload as Folder;
+      if (item.operation === "delete") {
+        const { error } = await client.from("folders").delete().eq("id", folder.id).eq("user_id", userId);
+        if (error) throw error;
+        continue;
+      }
+
       const { error } = await client.from("folders").upsert(folderToRemote(folder, userId));
       if (error) throw error;
       continue;
