@@ -40,6 +40,11 @@ body {
     linear-gradient(180deg, #101826 0%, #091019 56%, #050912 100%);
 }
 
+body,
+#__next {
+  min-height: 100vh;
+}
+
 body::before {
   content: "";
   position: fixed;
@@ -83,10 +88,18 @@ select {
   backdrop-filter: blur(18px);
 }
 
+.safe-shell {
+  padding-top: max(12px, env(safe-area-inset-top));
+  padding-right: max(12px, env(safe-area-inset-right));
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  padding-left: max(12px, env(safe-area-inset-left));
+}
+
 .prose-note {
   min-height: 320px;
   color: var(--text);
   outline: none;
+  font-size: 1rem;
 }
 
 .prose-note p.is-editor-empty:first-child::before {
@@ -147,4 +160,10 @@ select {
 
 .prose-note a {
   color: #8de2ff;
+}
+
+@media (max-width: 767px) {
+  .prose-note {
+    min-height: 260px;
+  }
 }

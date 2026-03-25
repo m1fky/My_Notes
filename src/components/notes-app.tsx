@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -191,6 +191,31 @@ async function normalizeLegacyLocalIds() {
   });
 }
 
+async function clearSeededDemoState(
+  supabaseReady: boolean,
+  isAuthed: boolean,
+  demoNoteIds: Set<string>,
+) {
+  if (!supabaseReady || !isAuthed) {
+    return;
+  }
+
+  const localNotes = await db.notes.toArray();
+
+  const localHasOnlyDemo =
+    localNotes.length > 0 && localNotes.every((note) => demoNoteIds.has(note.id));
+
+  if (!localHasOnlyDemo) {
+    return;
+  }
+
+  await db.transaction("rw", db.folders, db.notes, db.syncQueue, async () => {
+    await db.folders.clear();
+    await db.notes.clear();
+    await db.syncQueue.clear();
+  });
+}
+
 async function readFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -222,9 +247,11 @@ export function NotesApp() {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [notificationStatus, setNotificationStatus] = useState<NotificationPermission>("default");
   const [syncRequest, setSyncRequest] = useState(0);
+  const syncInFlightRef = useRef(false);
 
   const supabaseEnabled = hasSupabasePublicEnv();
   const supabase = getSupabaseBrowserClient();
+  const demoNoteIds = useMemo(() => new Set(demoNotes.map((note) => note.id)), []);
 
   const selectedNote = useMemo(
     () => notes.find((note) => note.id === selectedNoteId) ?? null,
@@ -306,6 +333,10 @@ export function NotesApp() {
     return () => subscription.unsubscribe();
   }, [supabase]);
 
+  useEffect(() => {
+    void clearSeededDemoState(supabaseEnabled, Boolean(session), demoNoteIds).then(loadLocal);
+  }, [demoNoteIds, session, supabaseEnabled]);
+
   async function loadLocal() {
     const [localNotes, localFolders] = await Promise.all([db.notes.toArray(), db.folders.toArray()]);
     setNotes(localNotes);
@@ -367,7 +398,14 @@ export function NotesApp() {
       return;
     }
 
+    if (syncInFlightRef.current) {
+      return;
+    }
+
+    syncInFlightRef.current = true;
+
     try {
+      const syncStartedAt = nowIso();
       setSyncLabel("Синхронизирую с облаком…");
       await ensureFoldersQueuedForSync();
       const queue = await db.syncQueue.toArray();
@@ -393,16 +431,35 @@ export function NotesApp() {
       }
 
       const snapshot = await pullSnapshot(supabase, session.user.id);
+      const [dirtyNotes, dirtyFolders] = await Promise.all([
+        db.notes
+          .toArray()
+          .then((items) => items.filter((note) => note.syncState !== "synced" && note.updatedAt > syncStartedAt)),
+        db.folders.toArray().then((items) => items.filter((folder) => folder.updatedAt > syncStartedAt)),
+      ]);
+
+      const mergedFolders = new Map(snapshot.folders.map((folder) => [folder.id, folder]));
+      for (const folder of dirtyFolders) {
+        mergedFolders.set(folder.id, folder);
+      }
+
+      const mergedNotes = new Map(snapshot.notes.map((note) => [note.id, note]));
+      for (const note of dirtyNotes) {
+        mergedNotes.set(note.id, note);
+      }
+
       await db.transaction("rw", db.folders, db.notes, async () => {
         await db.folders.clear();
         await db.notes.clear();
-        await db.folders.bulkPut(snapshot.folders);
-        await db.notes.bulkPut(snapshot.notes);
+        await db.folders.bulkPut([...mergedFolders.values()]);
+        await db.notes.bulkPut([...mergedNotes.values()]);
       });
       await loadLocal();
       setSyncLabel("Синхронизировано");
     } catch (error) {
       setSyncLabel(error instanceof Error ? error.message : "Ошибка синхронизации");
+    } finally {
+      syncInFlightRef.current = false;
     }
   }, [session, supabase]);
 
@@ -663,7 +720,7 @@ export function NotesApp() {
 
   if (supabaseEnabled && !session) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-6xl items-center justify-center px-4 py-8">
+      <main className="safe-shell mx-auto flex min-h-screen max-w-6xl items-center justify-center px-4 py-8">
         <div className="grid w-full gap-6 lg:grid-cols-[1.2fr_0.8fr]">
           <section className="glass-panel relative overflow-hidden rounded-[36px] border border-white/10 p-8 lg:p-10">
             <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-white/12 to-transparent" />
@@ -752,7 +809,7 @@ export function NotesApp() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-[1600px] flex-col gap-4 px-3 py-3 md:px-5 md:py-5">
+    <main className="safe-shell mx-auto flex min-h-screen max-w-[1600px] flex-col gap-4 px-3 py-3 md:px-5 md:py-5">
       <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)_320px]">
         <aside className="glass-panel rounded-[34px] border border-white/10 p-4">
           <div className="mb-4 flex items-center justify-between">
