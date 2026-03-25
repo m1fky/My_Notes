@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   Archive,
   Bell,
+  Check,
   Clock3,
   CheckCircle2,
   Cloud,
@@ -28,6 +29,7 @@ import {
   Trash2,
   Wifi,
   WifiOff,
+  X,
 } from "lucide-react";
 
 import { NoteEditor } from "@/components/note-editor";
@@ -39,7 +41,7 @@ import { formatReminder, hasDueReminder } from "@/lib/reminders";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { flushQueue, pullSnapshot } from "@/lib/sync";
 import type { Folder, Note, Reminder, SyncQueueItem } from "@/lib/types";
-import { cn, deviceNameFromNavigator, isUuid, makeId, toTitle } from "@/lib/utils";
+import { cn, deviceNameFromNavigator, isUuid, makeId } from "@/lib/utils";
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -394,6 +396,22 @@ function formatUpdatedAt(value?: string | null) {
   }).format(new Date(value));
 }
 
+function formatNoteSyncState(syncState: Note["syncState"]) {
+  switch (syncState) {
+    case "queued":
+      return "Ждет отправки";
+    case "conflicted":
+      return "Есть конфликт";
+    default:
+      return "В облаке";
+  }
+}
+
+function displayTitle(title?: string | null) {
+  const normalized = title?.trim();
+  return normalized?.length ? normalized : "Без названия";
+}
+
 function appendImagesToDoc(
   contentJson: Note["contentJson"],
   attachments: Array<Pick<Note["attachments"][number], "name" | "sourceUrl">>,
@@ -448,7 +466,13 @@ export function NotesApp() {
   const [syncRequest, setSyncRequest] = useState(0);
   const [mobileView, setMobileView] = useState<"library" | "editor" | "details">("library");
   const [isCompactLayout, setIsCompactLayout] = useState(false);
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [folderDraftName, setFolderDraftName] = useState("");
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [pendingDeleteFolderId, setPendingDeleteFolderId] = useState<string | null>(null);
   const syncInFlightRef = useRef(false);
+  const notesRef = useRef<Note[]>([]);
+  const foldersRef = useRef<Folder[]>([]);
 
   const supabaseEnabled = hasSupabasePublicEnv();
   const supabase = getSupabaseBrowserClient();
@@ -580,14 +604,51 @@ export function NotesApp() {
     });
   }, [session, supabaseEnabled]);
 
+  useEffect(() => {
+    notesRef.current = notes;
+  }, [notes]);
+
+  useEffect(() => {
+    foldersRef.current = folders;
+  }, [folders]);
+
   async function loadLocal() {
     const [localNotes, localFolders] = await Promise.all([db.notes.toArray(), db.folders.toArray()]);
+    notesRef.current = localNotes;
+    foldersRef.current = localFolders.sort((left, right) => left.name.localeCompare(right.name, "ru"));
     setNotes(localNotes);
-    setFolders(localFolders.sort((left, right) => left.name.localeCompare(right.name, "ru")));
+    setFolders(foldersRef.current);
   }
 
   async function pushQueueItem(item: SyncQueueItem) {
     await db.syncQueue.put(item);
+  }
+
+  function resetFolderComposer() {
+    setIsCreatingFolder(false);
+    setEditingFolderId(null);
+    setPendingDeleteFolderId(null);
+    setFolderDraftName("");
+  }
+
+  function startCreateFolder() {
+    setIsCreatingFolder(true);
+    setEditingFolderId(null);
+    setPendingDeleteFolderId(null);
+    setFolderDraftName("");
+  }
+
+  function startRenameFolder(folder: Folder) {
+    setEditingFolderId(folder.id);
+    setIsCreatingFolder(false);
+    setPendingDeleteFolderId(null);
+    setFolderDraftName(folder.name);
+  }
+
+  function requestDeleteFolder(folderId: string) {
+    setPendingDeleteFolderId(folderId);
+    setEditingFolderId(null);
+    setIsCreatingFolder(false);
   }
 
   async function ensureFoldersQueuedForSync() {
@@ -607,6 +668,13 @@ export function NotesApp() {
   }
 
   async function upsertFolder(folder: Folder) {
+    const nextFolders = foldersRef.current
+      .filter((currentFolder) => currentFolder.id !== folder.id)
+      .concat(folder)
+      .sort((left, right) => left.name.localeCompare(right.name, "ru"));
+    foldersRef.current = nextFolders;
+    setFolders(nextFolders);
+
     await db.folders.put(folder);
     await pushQueueItem({
       id: `queue-folder-${folder.id}`,
@@ -615,35 +683,53 @@ export function NotesApp() {
       payload: folder,
       createdAt: folder.updatedAt,
     });
-    await loadLocal();
     if (isOnline && supabase && session) {
       setSyncRequest(Date.now());
     }
   }
 
-  async function renameFolder(folder: Folder) {
-    const nextName = window.prompt("Название папки", folder.name)?.trim();
+  async function saveFolderName(folder?: Folder | null) {
+    const nextName = folderDraftName.trim();
 
-    if (!nextName || nextName === folder.name) {
+    if (!nextName) {
       return;
     }
 
-    await upsertFolder({
-      ...folder,
+    if (folder) {
+      if (nextName === folder.name) {
+        resetFolderComposer();
+        return;
+      }
+
+      await upsertFolder({
+        ...folder,
+        name: nextName,
+        updatedAt: nowIso(),
+      });
+      resetFolderComposer();
+      return;
+    }
+
+    const timestamp = nowIso();
+    const newFolder: Folder = {
+      id: makeId(),
+      userId: session?.user.id ?? null,
       name: nextName,
-      updatedAt: nowIso(),
-    });
+      color: folderColors[folders.length % folderColors.length],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    await upsertFolder(newFolder);
+    setFolderFilter(newFolder.id);
+    resetFolderComposer();
+
+    if (isCompactLayout) {
+      setMobileView("library");
+    }
   }
 
   async function deleteFolder(folder: Folder) {
-    const confirmed = window.confirm(
-      `Удалить папку «${folder.name}»? Заметки останутся, но будут перемещены в «Без папки».`,
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
     const timestamp = nowIso();
     const linkedNotes = (await db.notes.toArray()).filter((note) => note.folderId === folder.id && !note.deletedAt);
     const updatedNotes: Note[] = linkedNotes.map((note) => ({
@@ -685,7 +771,12 @@ export function NotesApp() {
       setFolderFilter("all");
     }
 
+    if (selectedNote?.folderId === folder.id && isCompactLayout) {
+      setMobileView("editor");
+    }
+
     await loadLocal();
+    resetFolderComposer();
 
     if (isOnline && supabase && session) {
       setSyncRequest(Date.now());
@@ -693,6 +784,13 @@ export function NotesApp() {
   }
 
   async function upsertNote(note: Note) {
+    const nextNotes = notesRef.current.some((currentNote) => currentNote.id === note.id)
+      ? notesRef.current.map((currentNote) => (currentNote.id === note.id ? note : currentNote))
+      : [...notesRef.current, note];
+
+    notesRef.current = nextNotes;
+    setNotes(nextNotes);
+
     await db.notes.put(note);
     await pushQueueItem({
       id: `queue-note-${note.id}`,
@@ -701,7 +799,6 @@ export function NotesApp() {
       payload: note,
       createdAt: note.updatedAt,
     });
-    await loadLocal();
     if (isOnline && supabase && session) {
       setSyncRequest(Date.now());
     }
@@ -869,42 +966,25 @@ export function NotesApp() {
     }
   }
 
-  async function createFolder() {
-    const suggestedName = `Папка ${folders.length + 1}`;
-    const name = window.prompt("Название новой папки", suggestedName)?.trim();
-
-    if (!name) {
-      return;
-    }
-
-    const timestamp = nowIso();
-    const folder: Folder = {
-      id: makeId(),
-      userId: session?.user.id ?? null,
-      name,
-      color: folderColors[folders.length % folderColors.length],
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    await upsertFolder(folder);
-    setFolderFilter(folder.id);
-    if (isCompactLayout) {
-      setMobileView("library");
-    }
-  }
-
   async function mutateSelectedNote(mutator: (note: Note) => Note) {
-    if (!selectedNote) {
+    if (!selectedNoteId) {
       return;
     }
 
-    const next = mutator(selectedNote);
+    const currentNote =
+      notesRef.current.find((note) => note.id === selectedNoteId) ?? (await db.notes.get(selectedNoteId));
+
+    if (!currentNote) {
+      return;
+    }
+
+    const next = mutator(currentNote);
     await upsertNote({
       ...next,
-      title: toTitle(next.title),
+      title: next.title,
       updatedAt: nowIso(),
-      version: next.version + 1,
-      syncState: next.syncState === "conflicted" ? "conflicted" : "queued",
+      version: currentNote.version + 1,
+      syncState: currentNote.syncState === "conflicted" ? "conflicted" : "queued",
     });
   }
 
@@ -1083,9 +1163,58 @@ export function NotesApp() {
     }));
   }
 
+  async function setReminderEnabled(enabled: boolean) {
+    if (!selectedNote) {
+      return;
+    }
+
+    const current = selectedNote.reminders[0];
+
+    if (!enabled) {
+      if (!current) {
+        return;
+      }
+
+      await mutateSelectedNote((note) => ({
+        ...note,
+        reminders: [
+          {
+            ...current,
+            isEnabled: false,
+          },
+        ],
+      }));
+      return;
+    }
+
+    await mutateSelectedNote((note) => ({
+      ...note,
+      reminders: [
+        current ?? {
+          id: makeId(),
+          noteId: note.id,
+          fireAt: new Date(Date.now() + 3600_000).toISOString(),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          repeatRule: "none",
+          isEnabled: true,
+          lastSentAt: null,
+        },
+      ].map((reminder) => ({
+        ...reminder,
+        isEnabled: true,
+      })),
+    }));
+  }
+
   const selectedFolder = selectedNote ? folders.find((folder) => folder.id === selectedNote.folderId) ?? null : null;
   const selectedReminder = selectedNote?.reminders[0] ?? null;
+  const reminderEnabled = Boolean(selectedReminder?.isEnabled);
   const archivedNotesCount = notes.filter((note) => note.isArchived && !note.deletedAt).length;
+  const selectedWordCount = selectedNote?.plainText.trim()
+    ? selectedNote.plainText.trim().split(/\s+/).filter(Boolean).length
+    : 0;
+  const selectedCharacterCount = selectedNote?.plainText.length ?? 0;
+  const selectedReadingMinutes = Math.max(1, Math.ceil(selectedWordCount / 180));
 
   const isIos =
     typeof navigator !== "undefined" &&
@@ -1205,7 +1334,7 @@ export function NotesApp() {
               </div>
               <div>
                 <p className="text-2xl font-semibold tracking-[-0.05em] text-white">
-                  {selectedNote ? selectedNote.title : "Коллекция заметок"}
+                  {selectedNote ? displayTitle(selectedNote.title) : "Коллекция заметок"}
                 </p>
                 <p className="mt-1 text-sm text-white/54">
                   {selectedNote
@@ -1270,8 +1399,14 @@ export function NotesApp() {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)_320px]">
-        <aside className={cn("glass-panel rounded-[34px] border border-white/10 p-4", mobileView !== "library" && "hidden lg:block")}>
+      <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)_320px] xl:grid-cols-[340px_minmax(0,1fr)_360px] 2xl:grid-cols-[360px_minmax(0,1fr)_380px]">
+        <aside
+          className={cn(
+            "glass-panel rounded-[34px] border border-white/10 p-4",
+            "lg:sticky lg:top-[170px] lg:flex lg:max-h-[calc(100vh-210px)] lg:flex-col lg:overflow-hidden",
+            mobileView !== "library" && "hidden lg:block",
+          )}
+        >
           <div className="mb-4 space-y-3">
             <div>
               <p className="text-sm uppercase tracking-[0.24em] text-white/40">Liquid Notes</p>
@@ -1288,13 +1423,55 @@ export function NotesApp() {
               </button>
               <button
                 type="button"
-                onClick={() => void createFolder()}
+                onClick={startCreateFolder}
                 className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[22px] border border-white/12 bg-white/6 px-4 py-3 text-sm font-medium text-white/78 transition hover:border-white/22 hover:bg-white/10 hover:text-white"
               >
                 <FolderPlus className="h-4 w-4" />
                 Папка
               </button>
             </div>
+
+            {isCreatingFolder ? (
+              <div className="rounded-[24px] border border-white/12 bg-white/8 p-3">
+                <label className="mb-2 block text-xs uppercase tracking-[0.2em] text-white/40">Новая папка</label>
+                <input
+                  value={folderDraftName}
+                  onChange={(event) => setFolderDraftName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void saveFolderName();
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      resetFolderComposer();
+                    }
+                  }}
+                  autoFocus
+                  placeholder="Например, Работа"
+                  className="w-full rounded-[20px] border border-white/10 bg-white/6 px-4 py-3 text-white outline-none placeholder:text-white/28"
+                />
+                <div className="mt-3 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={resetFolderComposer}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-[16px] border border-white/10 bg-white/6 text-white/62 transition hover:bg-white/10 hover:text-white"
+                    aria-label="Отменить создание папки"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void saveFolderName()}
+                    disabled={!folderDraftName.trim()}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-[16px] border border-sky-300/20 bg-sky-300/16 text-white transition hover:bg-sky-300/22 disabled:opacity-45"
+                    aria-label="Сохранить папку"
+                  >
+                    <Check className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="mb-4 flex items-center gap-2 rounded-[24px] border border-white/10 bg-white/7 px-4 py-3 text-white/58">
@@ -1326,6 +1503,78 @@ export function NotesApp() {
               const noteCount = notes.filter((note) => note.folderId === folder.id && !note.deletedAt).length;
               const active = folderFilter === folder.id;
 
+              if (editingFolderId === folder.id) {
+                return (
+                  <div key={folder.id} className="rounded-[22px] border border-white/12 bg-white/10 p-3">
+                    <input
+                      value={folderDraftName}
+                      onChange={(event) => setFolderDraftName(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void saveFolderName(folder);
+                        }
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          resetFolderComposer();
+                        }
+                      }}
+                      autoFocus
+                      className="w-full rounded-[18px] border border-white/10 bg-white/6 px-4 py-3 text-white outline-none"
+                    />
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <span className="text-sm text-white/48">{noteCount} заметок</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={resetFolderComposer}
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-[16px] border border-white/10 bg-white/6 text-white/62 transition hover:bg-white/10 hover:text-white"
+                          aria-label={`Отменить редактирование папки ${folder.name}`}
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void saveFolderName(folder)}
+                          disabled={!folderDraftName.trim()}
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-[16px] border border-sky-300/20 bg-sky-300/16 text-white transition hover:bg-sky-300/22 disabled:opacity-45"
+                          aria-label={`Сохранить папку ${folder.name}`}
+                        >
+                          <Check className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (pendingDeleteFolderId === folder.id) {
+                return (
+                  <div key={folder.id} className="rounded-[22px] border border-rose-300/16 bg-rose-400/10 p-3">
+                    <p className="text-sm font-medium text-rose-50">Удалить «{folder.name}»?</p>
+                    <p className="mt-1 text-sm leading-6 text-rose-100/72">
+                      Заметки останутся и автоматически перейдут в «Без папки».
+                    </p>
+                    <div className="mt-3 flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={resetFolderComposer}
+                        className="inline-flex rounded-[16px] border border-white/10 bg-white/8 px-4 py-2 text-sm text-white/72 transition hover:bg-white/12 hover:text-white"
+                      >
+                        Отмена
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteFolder(folder)}
+                        className="inline-flex rounded-[16px] border border-rose-300/20 bg-rose-400/18 px-4 py-2 text-sm font-medium text-rose-50 transition hover:bg-rose-400/24"
+                      >
+                        Удалить
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+
               return (
                 <div
                   key={folder.id}
@@ -1349,7 +1598,7 @@ export function NotesApp() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => void renameFolder(folder)}
+                    onClick={() => startRenameFolder(folder)}
                     className="inline-flex h-10 w-10 items-center justify-center rounded-[16px] border border-white/10 bg-white/6 text-white/62 transition hover:border-white/20 hover:bg-white/12 hover:text-white"
                     aria-label={`Переименовать папку ${folder.name}`}
                   >
@@ -1357,7 +1606,7 @@ export function NotesApp() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => void deleteFolder(folder)}
+                    onClick={() => requestDeleteFolder(folder.id)}
                     className="inline-flex h-10 w-10 items-center justify-center rounded-[16px] border border-rose-300/12 bg-rose-400/8 text-rose-100/78 transition hover:border-rose-300/20 hover:bg-rose-400/14 hover:text-rose-50"
                     aria-label={`Удалить папку ${folder.name}`}
                   >
@@ -1368,12 +1617,12 @@ export function NotesApp() {
             })}
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-3 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
             <div className="flex items-center justify-between">
               <p className="text-sm uppercase tracking-[0.24em] text-white/35">Список</p>
               <span className="text-sm text-white/48">{visibleNotes.length}</span>
             </div>
-            <div className="max-h-[58vh] space-y-3 overflow-y-auto pr-1">
+            <div className="max-h-[58vh] space-y-3 overflow-y-auto pr-1 lg:min-h-0 lg:flex-1 lg:max-h-none">
               <AnimatePresence initial={false}>
                 {visibleNotes.map((note) => (
                   <motion.button
@@ -1394,7 +1643,7 @@ export function NotesApp() {
                   >
                     <div className="mb-3 flex items-start justify-between gap-3">
                       <div>
-                        <p className="line-clamp-2 text-base font-medium text-white">{note.title}</p>
+                        <p className="line-clamp-2 text-base font-medium text-white">{displayTitle(note.title)}</p>
                         <p className="mt-1 text-xs text-white/42">
                           {folders.find((folder) => folder.id === note.folderId)?.name ?? "Без папки"}
                         </p>
@@ -1437,7 +1686,7 @@ export function NotesApp() {
           </div>
         </aside>
 
-        <section className={cn("space-y-4", mobileView !== "editor" && "hidden lg:block")}>
+        <section className={cn("min-w-0 space-y-4 lg:min-h-[calc(100vh-210px)]", mobileView !== "editor" && "hidden lg:block")}>
           {selectedNote ? (
             <div className="glass-panel rounded-[30px] border border-white/10 px-5 py-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1463,7 +1712,9 @@ export function NotesApp() {
                     </span>
                   </div>
                   <div>
-                    <h2 className="text-2xl font-semibold tracking-[-0.04em] text-white">{selectedNote.title}</h2>
+                    <h2 className="text-2xl font-semibold tracking-[-0.04em] text-white">
+                      {displayTitle(selectedNote.title)}
+                    </h2>
                     <p className="mt-1 text-sm leading-6 text-white/58">
                       {selectedNote.plainText
                         ? selectedNote.plainText.slice(0, 140)
@@ -1473,6 +1724,10 @@ export function NotesApp() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-white/10 bg-white/6 px-4 py-2 text-sm text-white/62">
+                    <Cloud className="h-4 w-4" />
+                    {formatNoteSyncState(selectedNote.syncState)}
+                  </span>
                   <button
                     type="button"
                     onClick={() =>
@@ -1515,6 +1770,7 @@ export function NotesApp() {
           ) : null}
 
           <NoteEditor
+            key={selectedNote?.id ?? "empty-note"}
             note={selectedNote}
             onTitleChange={(title) => {
               void mutateSelectedNote((note) => ({ ...note, title }));
@@ -1556,7 +1812,55 @@ export function NotesApp() {
           ) : null}
         </section>
 
-        <aside className={cn("space-y-4", mobileView !== "details" && "hidden lg:block")}>
+        <aside
+          className={cn(
+            "space-y-4",
+            "lg:sticky lg:top-[170px] lg:max-h-[calc(100vh-210px)] lg:overflow-y-auto",
+            mobileView !== "details" && "hidden lg:block",
+          )}
+        >
+          <div className="glass-panel rounded-[34px] border border-white/10 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm uppercase tracking-[0.24em] text-white/36">Обзор</p>
+              {selectedNote ? (
+                <span className="rounded-full border border-white/10 bg-white/8 px-3 py-1.5 text-sm text-white/62">
+                  {formatNoteSyncState(selectedNote.syncState)}
+                </span>
+              ) : null}
+            </div>
+            {selectedNote ? (
+              <div className="mt-4 space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                  {[
+                    ["Слов", String(selectedWordCount)],
+                    ["Символов", String(selectedCharacterCount)],
+                    ["Фото", String(selectedNote.attachments.length)],
+                    ["Чтение", `${selectedReadingMinutes} мин`],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-[24px] border border-white/10 bg-white/6 p-4">
+                      <p className="text-sm text-white/46">{label}</p>
+                      <p className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-white">{value}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-[24px] border border-white/10 bg-white/6 p-4">
+                  <p className="text-sm text-white/46">Состояние</p>
+                  <p className="mt-2 text-base font-medium text-white">
+                    {selectedFolder?.name ?? "Без папки"} · обновлено {formatUpdatedAt(selectedNote.updatedAt)}
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-white/58">
+                    Здесь можно быстро проверить статус заметки перед синхронизацией, переносом в папку или
+                    настройкой напоминания.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-4 text-sm leading-6 text-white/56">
+                Выберите заметку, и справа появится краткий обзор по тексту, изображениям и синхронизации.
+              </p>
+            )}
+          </div>
+
           <div className="glass-panel rounded-[34px] border border-white/10 p-5">
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm uppercase tracking-[0.24em] text-white/36">Свойства</p>
@@ -1616,44 +1920,67 @@ export function NotesApp() {
                       <Bell className="h-4 w-4" />
                       Напоминание
                     </div>
-                    {selectedReminder ? (
-                      <button
-                        type="button"
-                        onClick={() => void clearReminder()}
-                        className="text-sm text-white/56 transition hover:text-white"
-                      >
-                        Очистить
-                      </button>
-                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void setReminderEnabled(!reminderEnabled)}
+                      className={cn(
+                        "rounded-full border px-3 py-1.5 text-sm transition",
+                        reminderEnabled
+                          ? "border-emerald-300/16 bg-emerald-400/12 text-emerald-100"
+                          : "border-white/10 bg-white/8 text-white/60 hover:text-white",
+                      )}
+                    >
+                      {reminderEnabled ? "Вкл" : "Выкл"}
+                    </button>
                   </div>
-                  <input
-                    type="datetime-local"
-                    value={
-                      selectedReminder?.fireAt
-                        ? selectedReminder.fireAt.slice(0, 16)
-                        : new Date(Date.now() + 3600_000).toISOString().slice(0, 16)
-                    }
-                    onChange={(event) =>
-                      void updateReminder({
-                        fireAt: new Date(event.target.value).toISOString(),
-                      })
-                    }
-                    className="w-full rounded-[20px] border border-white/10 bg-white/7 px-4 py-3 text-white outline-none"
-                  />
-                  <select
-                    value={selectedReminder?.repeatRule ?? "none"}
-                    onChange={(event) =>
-                      void updateReminder({
-                        repeatRule: event.target.value as Reminder["repeatRule"],
-                      })
-                    }
-                    className="w-full rounded-[20px] border border-white/10 bg-white/7 px-4 py-3 text-white outline-none"
-                  >
-                    <option value="none">Без повтора</option>
-                    <option value="daily">Каждый день</option>
-                    <option value="weekly">Каждую неделю</option>
-                  </select>
-                  <div className="text-sm text-white/54">{formatReminder(selectedReminder ?? undefined)}</div>
+                  {!reminderEnabled ? (
+                    <div className="rounded-[20px] border border-dashed border-white/12 bg-white/4 px-4 py-4 text-sm leading-6 text-white/56">
+                      Напоминание по умолчанию выключено. Включите его, чтобы выбрать дату и повтор.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="rounded-[20px] border border-emerald-300/10 bg-emerald-400/8 px-4 py-3 text-sm leading-6 text-emerald-50/84">
+                        Напоминание придет на все активные устройства этого аккаунта, где разрешены push-уведомления.
+                      </div>
+                      <input
+                        type="datetime-local"
+                        value={
+                          selectedReminder?.fireAt
+                            ? selectedReminder.fireAt.slice(0, 16)
+                            : new Date(Date.now() + 3600_000).toISOString().slice(0, 16)
+                        }
+                        onChange={(event) =>
+                          void updateReminder({
+                            fireAt: new Date(event.target.value).toISOString(),
+                          })
+                        }
+                        className="w-full rounded-[20px] border border-white/10 bg-white/7 px-4 py-3 text-white outline-none"
+                      />
+                      <select
+                        value={selectedReminder?.repeatRule ?? "none"}
+                        onChange={(event) =>
+                          void updateReminder({
+                            repeatRule: event.target.value as Reminder["repeatRule"],
+                          })
+                        }
+                        className="w-full rounded-[20px] border border-white/10 bg-white/7 px-4 py-3 text-white outline-none"
+                      >
+                        <option value="none">Без повтора</option>
+                        <option value="daily">Каждый день</option>
+                        <option value="weekly">Каждую неделю</option>
+                      </select>
+                      <div className="flex items-center justify-between gap-3 text-sm text-white/54">
+                        <span>{formatReminder(selectedReminder ?? undefined)}</span>
+                        <button
+                          type="button"
+                          onClick={() => void clearReminder()}
+                          className="transition hover:text-white"
+                        >
+                          Удалить
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <button
@@ -1715,7 +2042,7 @@ export function NotesApp() {
           </div>
 
           <div className="glass-panel rounded-[34px] border border-white/10 p-5">
-            <p className="text-sm uppercase tracking-[0.24em] text-white/36">Как это работает</p>
+            <p className="text-sm uppercase tracking-[0.24em] text-white/36">Рабочий поток</p>
             <div className="mt-4 space-y-3 text-sm leading-6 text-white/64">
               <div className="flex items-start gap-3 rounded-[24px] border border-white/10 bg-white/6 p-4">
                 <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-300" />
@@ -1724,6 +2051,11 @@ export function NotesApp() {
               <div className="flex items-start gap-3 rounded-[24px] border border-white/10 bg-white/6 p-4">
                 <Archive className="mt-0.5 h-4 w-4 text-sky-300" />
                 При появлении интернета заметки и папки синхронизируются между устройствами через облако.
+              </div>
+              <div className="flex items-start gap-3 rounded-[24px] border border-white/10 bg-white/6 p-4">
+                <Sparkles className="mt-0.5 h-4 w-4 text-amber-200" />
+                На ПК интерфейс разбит на три зоны: библиотека, редактор и инспектор. На телефоне они разведены
+                по отдельным экранам, чтобы ничего не мешало письму.
               </div>
             </div>
           </div>
