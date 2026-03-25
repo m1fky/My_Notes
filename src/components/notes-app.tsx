@@ -427,6 +427,7 @@ export function NotesApp() {
   const [authBusy, setAuthBusy] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [notificationStatus, setNotificationStatus] = useState<NotificationPermission>("default");
+  const [hasPushSubscription, setHasPushSubscription] = useState(false);
   const [syncRequest, setSyncRequest] = useState(0);
   const [mobileView, setMobileView] = useState<"library" | "editor" | "details">("library");
   const [isCompactLayout, setIsCompactLayout] = useState(false);
@@ -500,6 +501,21 @@ export function NotesApp() {
     };
   }, []);
 
+  const refreshPushSubscriptionStatus = useCallback(async () => {
+    if (typeof window === "undefined" || !("serviceWorker" in navigator)) {
+      setHasPushSubscription(false);
+      return;
+    }
+
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      setHasPushSubscription(Boolean(subscription));
+    } catch {
+      setHasPushSubscription(false);
+    }
+  }, []);
+
   useEffect(() => {
     const bootstrap = async () => {
       await ensureSeededData(!supabaseEnabled);
@@ -559,6 +575,10 @@ export function NotesApp() {
 
     return () => subscription.unsubscribe();
   }, [supabase]);
+
+  useEffect(() => {
+    void refreshPushSubscriptionStatus();
+  }, [refreshPushSubscriptionStatus, session]);
 
   useEffect(() => {
     void purgeLocalDemoState(supabaseEnabled, Boolean(session)).then((changed) => {
@@ -1007,7 +1027,13 @@ export function NotesApp() {
       return;
     }
 
-    const permission = await Notification.requestPermission();
+    if (notificationStatus === "granted" && hasPushSubscription) {
+      setSyncLabel("Push уже подключен");
+      return;
+    }
+
+    const permission =
+      Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
     setNotificationStatus(permission);
 
     if (permission !== "granted") {
@@ -1021,10 +1047,13 @@ export function NotesApp() {
     }
 
     const registration = await navigator.serviceWorker.ready;
-    const subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: base64ToUint8Array(publicEnv.vapidPublicKey),
-    });
+    const existingSubscription = await registration.pushManager.getSubscription();
+    const subscription =
+      existingSubscription ??
+      (await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: base64ToUint8Array(publicEnv.vapidPublicKey),
+      }));
 
     if (session) {
       await fetch("/api/push/subscribe", {
@@ -1038,7 +1067,8 @@ export function NotesApp() {
       });
     }
 
-    setSyncLabel("Push-уведомления включены");
+    setHasPushSubscription(true);
+    setSyncLabel(existingSubscription ? "Push уже подключен" : "Push-уведомления включены");
   }
 
   async function promptInstall() {
@@ -1290,10 +1320,11 @@ export function NotesApp() {
                 <button
                   type="button"
                   onClick={enableNotifications}
-                  className="inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-white/12 bg-white/6 px-4 py-2 text-sm font-medium text-white/78 transition hover:border-white/22 hover:bg-white/10 hover:text-white"
+                  disabled={hasPushSubscription}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-white/12 bg-white/6 px-4 py-2 text-sm font-medium text-white/78 transition hover:border-white/22 hover:bg-white/10 hover:text-white disabled:opacity-55"
                 >
                   <Bell className="h-4 w-4" />
-                  Push
+                  {hasPushSubscription ? "Push подключен" : "Push"}
                 </button>
               ) : null}
               {session ? (
@@ -1320,7 +1351,11 @@ export function NotesApp() {
             </span>
             <span className="liquid-pill inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-white/68">
               <Bell className="h-4 w-4" />
-              {notificationStatus === "granted" ? "Push включен" : "Push не включен"}
+              {hasPushSubscription
+                ? "Push включен"
+                : notificationStatus === "granted"
+                  ? "Push разрешен"
+                  : "Push не включен"}
             </span>
             <span className="liquid-pill inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-white/68">
               <Archive className="h-4 w-4" />
@@ -1330,11 +1365,11 @@ export function NotesApp() {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)_320px] xl:grid-cols-[340px_minmax(0,1fr)_360px] 2xl:grid-cols-[360px_minmax(0,1fr)_380px]">
+      <div className="grid gap-4 lg:items-start lg:grid-cols-[320px_minmax(0,1fr)_320px] xl:grid-cols-[340px_minmax(0,1fr)_360px] 2xl:grid-cols-[360px_minmax(0,1fr)_380px]">
         <aside
           className={cn(
             "glass-panel rounded-[34px] border border-white/10 p-4",
-            "lg:sticky lg:top-[170px] lg:flex lg:max-h-[calc(100vh-210px)] lg:flex-col lg:overflow-hidden",
+            "lg:sticky lg:top-[170px] lg:flex lg:h-[calc(100vh-210px)] lg:min-h-0 lg:flex-col lg:overflow-hidden",
             mobileView !== "library" && "hidden lg:block",
           )}
         >
@@ -1702,7 +1737,7 @@ export function NotesApp() {
         <aside
           className={cn(
             "space-y-4",
-            "lg:sticky lg:top-[170px] lg:max-h-[calc(100vh-210px)] lg:overflow-y-auto lg:pr-1 lg:pb-3",
+            "lg:sticky lg:top-[170px] lg:h-[calc(100vh-210px)] lg:min-h-0 lg:overflow-y-auto lg:pr-1 lg:pb-3",
             mobileView !== "details" && "hidden lg:block",
           )}
         >

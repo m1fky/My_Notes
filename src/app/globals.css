@@ -90,6 +90,14 @@ select {
   font: inherit;
 }
 
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
 ::selection {
   background: rgba(125, 211, 252, 0.28);
 }
@@ -221,6 +229,9 @@ select {
 
 .prose-note a {
   color: #8de2ff;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
 }
 
 @media (max-width: 767px) {
